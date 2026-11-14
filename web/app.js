@@ -256,7 +256,7 @@ function curveFromVectors(anchors, seed) {
     Math.sin(seed * 4.17 + index * 1.71),
     Math.cos(seed * 2.39 + index * 2.27),
     Math.sin(seed * 3.11 + index * 1.13),
-  ).multiplyScalar(0.16);
+  ).multiplyScalar(0.035);
   const controls = anchors.map((point, index) => (
     index === 0 || index === anchors.length - 1 ? point : point.clone().add(offset(index))
   ));
@@ -271,7 +271,7 @@ function edgeCurve(edge) {
     Math.sin(edge.curveSeed * 3.13 + index * 2.71),
     Math.cos(edge.curveSeed * 1.91 + index * 1.37),
     Math.sin(edge.curveSeed * 4.29 + index * 1.83),
-  ).multiplyScalar(Math.min(1.15, span.length() * 0.13));
+  ).multiplyScalar(Math.min(0.35, span.length() * 0.045));
   return new THREE.CatmullRomCurve3([
     start,
     start.clone().addScaledVector(span, 0.3).add(bend(1)),
