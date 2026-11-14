@@ -154,19 +154,37 @@ const occupancy = instanced(new THREE.BoxGeometry(0.94, 0.94, 0.94), new THREE.M
   transparent: true, opacity: 0.06, depthWrite: false,
 }), SIZE ** 3);
 
-// Connectors: every step is one cell along one axis, so each is drawn as a
-// unit cylinder, with a small sphere at every cell to round the corners.
-const MAX_SEGMENTS = 3000;
+// Connectors grow cell by cell, but are drawn as smooth curves that cut the
+// grid's corners. Each curve is a chain of short cylinders (one instanced
+// mesh) with a sphere at every joint; dendrites taper away from the body, and
+// axons start with a cone-shaped hillock and end in a bouton at a synapse.
+const MAX_SEGMENTS = 6000;
 // Unlit: the tubes are thin enough that shading adds nothing, and flat color
 // keeps axons and dendrites their true legend colors.
 const connectorMaterial = new THREE.MeshBasicMaterial();
-const segmentMesh = instanced(new THREE.CylinderGeometry(1, 1, 1, 8, 1, true), connectorMaterial, MAX_SEGMENTS);
+const segmentMesh = instanced(new THREE.CylinderGeometry(1, 1, 1, 7, 1, true), connectorMaterial, MAX_SEGMENTS);
 const jointMesh = instanced(new THREE.SphereGeometry(1, 8, 6), connectorMaterial, MAX_SEGMENTS);
 const STATE_BRIGHTNESS = { growing: 0.6, connected: 1, retracting: 0.3 };
 
 // Neuron bodies, and their halos as one layer of glowing points with a size
 // and color per neuron.
-const somaMesh = instanced(new THREE.SphereGeometry(0.34, 20, 14), new THREE.MeshStandardMaterial({
+// A lumpy cell body rather than a perfect sphere; each neuron gets its own
+// rotation and stretch so no two look the same.
+function somaGeometry() {
+  const geometry = new THREE.SphereGeometry(0.38, 24, 18);
+  const position = geometry.attributes.position;
+  const v = new THREE.Vector3();
+  for (let i = 0; i < position.count; i += 1) {
+    v.fromBufferAttribute(position, i).normalize();
+    const bump = 1 + 0.1 * Math.sin(v.x * 3 + 1) * Math.sin(v.y * 2.5 + 2) * Math.sin(v.z * 3.5)
+      + 0.05 * Math.sin(v.x * 4 + v.z * 3);
+    v.multiplyScalar(0.38 * bump);
+    position.setXYZ(i, v.x, v.y, v.z);
+  }
+  geometry.computeVertexNormals();
+  return geometry;
+}
+const somaMesh = instanced(somaGeometry(), new THREE.MeshStandardMaterial({
   color: COLORS.neuron, emissive: COLORS.neuron, emissiveIntensity: 0.25, roughness: 0.35,
 }), 64);
 const haloGeometry = new THREE.BufferGeometry();
@@ -235,7 +253,14 @@ let haloColors = new Float32Array(0);
 
 function createScene() {
   const count = brain.neurons.length;
-  brain.neurons.forEach((neuron, i) => place(somaMesh, i, cellToVector(neuron.soma), 1));
+  const turn = new THREE.Euler();
+  const rotation = new THREE.Quaternion();
+  const stretch = new THREE.Vector3();
+  brain.neurons.forEach((neuron, i) => {
+    rotation.setFromEuler(turn.set(i * 2.1, i * 1.3, i * 0.7));
+    stretch.set(1 + 0.15 * Math.sin(i * 1.7), 1 + 0.15 * Math.cos(i * 2.3), 1 + 0.12 * Math.sin(i * 3.1));
+    place(somaMesh, i, cellToVector(neuron.soma), stretch, rotation);
+  });
   finish(somaMesh, count);
   const positions = new Float32Array(count * 3);
   brain.neurons.forEach((neuron, i) => cellToVector(neuron.soma).toArray(positions, i * 3));
@@ -252,32 +277,72 @@ function connectorRadius(connector) {
   return base * 0.7 + 0.06 * (connector.synapse.weight / brain.p.maxWeight);
 }
 
-const from = new THREE.Vector3();
-const to = new THREE.Vector3();
+// The drawn curve of a connector: its cell path with each step split in two,
+// then smoothed a few times with both ends fixed. Straight runs stay straight,
+// corners are cut and staircases become diagonals. Cached until the
+// connector's cells change.
+const SUBSTEPS = 2;
+const curves = new WeakMap(); // connector -> { length, last, points }
+function smoothCurve(cells) {
+  const raw = cells.map(cellToVector);
+  let points = [raw[0]];
+  for (let i = 1; i < raw.length; i += 1) {
+    points.push(raw[i - 1].clone().lerp(raw[i], 0.5), raw[i]);
+  }
+  for (let pass = 0; pass < 4; pass += 1) {
+    points = points.map((p, j) => (j === 0 || j === points.length - 1
+      ? p
+      : p.clone().multiplyScalar(0.5).addScaledVector(points[j - 1], 0.25).addScaledVector(points[j + 1], 0.25)));
+  }
+  return points;
+}
+function connectorCurve(connector) {
+  const cached = curves.get(connector);
+  const last = connector.cells.at(-1);
+  if (cached && cached.length === connector.cells.length && cached.last === last) return cached.points;
+  const points = smoothCurve([connector.owner.soma, ...connector.cells]);
+  curves.set(connector, { length: connector.cells.length, last, points });
+  return points;
+}
+
+// Radius along a connector. s runs from 0 at the body to 1 at the tip, and
+// cells is the distance from the body in cells.
+function taper(connector, base, s, cells) {
+  if (connector.type === 'dendrite') return base * (1.9 - 1.1 * s); // thick at the body
+  return base * (1 + 1.2 * Math.max(0, 1 - cells / 0.9)); // axon hillock: a cone about one cell long
+}
+
+const up = new THREE.Vector3(0, 1, 0);
+const direction = new THREE.Vector3();
 const middle = new THREE.Vector3();
 const segmentScale = new THREE.Vector3();
+const segmentRotation = new THREE.Quaternion();
 function updateConnectors() {
   let segments = 0;
   let joints = 0;
   brain.connectors.forEach((connector) => {
     if (!connector.cells.length) return;
-    const radius = connectorRadius(connector);
+    const base = connectorRadius(connector);
     tint.setHex(COLORS[connector.type]).multiplyScalar(STATE_BRIGHTNESS[connector.state]);
-    segmentScale.set(radius, 1, radius);
-    let previous = connector.owner.soma;
-    connector.cells.forEach((cell) => {
-      if (segments >= MAX_SEGMENTS) return;
-      from.copy(cellToVector(previous));
-      to.copy(cellToVector(cell));
-      const axis = previous.x !== cell.x ? 'x' : previous.y !== cell.y ? 'y' : 'z';
-      place(segmentMesh, segments, middle.addVectors(from, to).multiplyScalar(0.5), segmentScale, AXIS_ROTATION[axis]);
+    const points = connectorCurve(connector);
+    const last = points.length - 1;
+    for (let j = 1; j <= last && segments < MAX_SEGMENTS; j += 1) {
+      const a = points[j - 1];
+      const b = points[j];
+      direction.subVectors(b, a);
+      const length = direction.length();
+      if (length < 1e-4) continue;
+      const radius = taper(connector, base, (j - 0.5) / last, (j - 0.5) / SUBSTEPS);
+      segmentRotation.setFromUnitVectors(up, direction.divideScalar(length));
+      place(segmentMesh, segments, middle.addVectors(a, b).multiplyScalar(0.5), segmentScale.set(radius, length, radius), segmentRotation);
       segmentMesh.setColorAt(segments, tint);
       segments += 1;
-      place(jointMesh, joints, to, radius);
+      // A joint rounds each bend; a connected axon ends in a bouton.
+      const bouton = j === last && connector.type === 'axon' && connector.synapse;
+      place(jointMesh, joints, b, bouton ? base * 2.6 : taper(connector, base, j / last, j / SUBSTEPS));
       jointMesh.setColorAt(joints, tint);
       joints += 1;
-      previous = cell;
-    });
+    }
   });
   finish(segmentMesh, segments);
   finish(jointMesh, joints);
@@ -316,14 +381,24 @@ function syncScene() {
   updateHud();
 }
 
-function pointOnPath(path, t, target) {
-  const clamped = Math.max(0, Math.min(path.length - 1, t));
-  const i = Math.min(path.length - 2, Math.floor(clamped));
-  const a = path[i];
-  const b = path[i + 1];
-  const f = clamped - i;
-  target.set(4 - (a.x + (b.x - a.x) * f), 4 - (a.y + (b.y - a.y) * f), (a.z + (b.z - a.z) * f) - 4);
-  return target;
+// The drawn route of a synapse's spikes: the axon's curve to the synapse,
+// then the dendrite's curve back to its body. Each cell step is SUBSTEPS
+// points, so a spike at cell index t sits at curve index t * SUBSTEPS.
+const routes = new WeakMap(); // synapse -> points
+function spikeRoute(synapse) {
+  let route = routes.get(synapse);
+  if (route) return route;
+  const out = synapse.axon ? connectorCurve(synapse.axon) : [cellToVector(synapse.cell)];
+  const back = synapse.dendrite ? [...connectorCurve(synapse.dendrite)].reverse().slice(1) : [];
+  route = out.concat(back);
+  routes.set(synapse, route);
+  return route;
+}
+
+function pointOnPath(points, t, target) {
+  const clamped = Math.max(0, Math.min(points.length - 1, t));
+  const i = Math.min(points.length - 2, Math.floor(clamped));
+  return target.lerpVectors(points[i], points[i + 1], clamped - i);
 }
 
 const spot = new THREE.Vector3();
@@ -336,8 +411,9 @@ function updateSpikes(frac) {
     // whatever a neuron fires is its own (gold) signal.
     const kind = spike.synapse.from.channel === 'dark' ? 'dark' : 'lit';
     const g = glowTint[kind];
+    const route = spikeRoute(spike.synapse);
     for (let k = 0; k < TRAIL.length; k += 1) {
-      const p = pointOnPath(spike.path, head - TRAIL[k], spot);
+      const p = pointOnPath(route, (head - TRAIL[k]) * SUBSTEPS, spot);
       const i = (s * TRAIL.length + k) * 3;
       const fade = 1 - k / TRAIL.length;
       glowPositions[i] = p.x;

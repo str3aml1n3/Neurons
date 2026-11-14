@@ -222,10 +222,11 @@ simple credit assignment rarely develop.
 
 | Visual | Meaning |
 | --- | --- |
-| White sphere with a halo | Neuron body. The halo brightens as charge builds and flashes gold when it fires. |
-| Cyan tube | Dendrite (signals in) |
-| Coral tube | Axon (signals out) |
+| Pale, irregular body with a halo | Neuron body. The halo brightens as charge builds and flashes gold when it fires. |
+| Cyan tube, thick at the body and tapering | Dendrite (signals in) |
+| Coral tube with a cone at the body | Axon (signals out). The cone is the axon hillock; a connected axon ends in a round bouton at its synapse. |
 | Tube thickness | Synapse weight, once connected |
+| Smooth curves | Connectors are drawn as curves that cut the grid's corners, so paths look shorter than their cell routes. The simulation still grows them cell by cell: the faint tinted cubes show the cells they really occupy, and signals follow the drawn curves. |
 | Faint tinted cube | A cell occupied by a connector |
 | Lime cube | Synapse. Size shows weight; glow shows trophic support and fades before a prune. Responsible synapses flash on dopamine. |
 | Gold glowing dot with a trail | A signal traveling one cell per tick |
