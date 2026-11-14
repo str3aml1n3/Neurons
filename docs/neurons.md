@@ -527,6 +527,37 @@ push its neighbours back below threshold before their turn.
   their length, as real dendrites do, so a neuron can gather enough inputs for
   competition to work with.
 
+### Readout and input fan experiments
+
+The answer is decided by very few connections: about **10 excitatory synapses
+onto the output strip, from about 9 neurons**, and almost no neuron is wired to
+both halves. So a neuron wired to "small" can only ever vote small. Two
+parameters widen the ends of the network: \`outputDendrites\` (dendrites per
+output cell) and \`inputAxons\` (axons per digit channel), both 1 by default.
+
+| Setting | Balanced accuracy | Synapses onto the outputs | Neurons wired to both halves |
+| --- | --- | --- | --- |
+| Baseline | 74.0% / 75.1% | ~10 | 0.1–0.3 |
+| Output dendrites 2–5, or input axons 2–3 | 70.0–73.0% | 10–14 | 0.3–0.6 |
+| Output 3 + input 2 | 77.4% / 73.5% | ~12 | 0.5–0.6 |
+| Output 5 + input 3, elimination off | 68.9–69.1% | 16–18 | 1.3–2.0 |
+
+(Two numbers mean two independent sets of 10 networks.)
+
+- **Extra connectors mostly find nothing to connect to.** A synapse needs a
+  growing partner, and each connector holds only one synapse, so most neurons'
+  axons are already taken. Even 5 dendrites per output cell add only 4
+  synapses to the readout.
+- **A bigger readout doesn't help anyway.** With elimination off, the readout
+  grows to 18 synapses, but its neurons still fire for 5–8 digits each, so
+  their votes carry little information.
+- **The common root cause** of this and the earlier experiments is the
+  one-synapse-per-connector rule: it limits how many inputs a neuron gathers,
+  how many neurons the readout hears, and whether spare connectors find
+  partners. The natural fix is **synapses along the way** (en passant): a
+  synapse forms wherever an axon passes next to another neuron's dendrite, so
+  one connector can carry many, as in real cortex.
+
 ## What you see
 
 | Visual | Meaning |
@@ -566,6 +597,8 @@ All values live in `PARAMS` in [`web/brain.js`](../web/brain.js).
 | `neurons` | 16 | Number of neurons |
 | `maxAxons` | 3 | Each neuron gets 1 to this many axons |
 | `maxDendrites` | 3 | Each neuron gets 1 to this many dendrites |
+| `inputAxons` | 1 | Axons grown by each digit channel |
+| `outputDendrites` | 1 | Dendrites grown by each output cell |
 | `maxLength` | 10 | Longest straightened path before a connector gives up |
 | `maxSteps` | 30 | Tip steps without connecting before a connector gives up |
 | `stuckLimit` | 6 | Blocked steps tolerated before giving up |

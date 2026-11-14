@@ -24,6 +24,8 @@ export const PARAMS = {
   size: 9, // cube edge in cells; the digit and output strip stay 9 wide, centered
   maxAxons: 3, // each neuron gets 1..maxAxons axons
   maxDendrites: 3, // and 1..maxDendrites dendrites
+  inputAxons: 1, // axons grown by each digit channel
+  outputDendrites: 1, // dendrites grown by each output cell
   maxLength: 10, // longest (straightened) connector before it gives up
   maxSteps: 30, // tip steps without connecting before it gives up
   stuckLimit: 6, // blocked growth attempts before retracting
@@ -230,14 +232,14 @@ export class Brain {
       ['lit', 'dark'].forEach((channel) => {
         const cells = this.segmentCells.filter((c) => c.segment === segment && c.channel === channel);
         const node = this.addNode({ kind: 'input', segment, channel, cells, soma: this.pick(cells) });
-        node.axons.push(this.newConnector(node, 'axon'));
+        for (let a = 0; a < this.p.inputAxons; a += 1) node.axons.push(this.newConnector(node, 'axon'));
         this.inputs.push(node);
       });
     }
     this.outputCells.forEach((cell) => {
       // x is the cell's position along the strip (0-8), whatever the cube size.
       const node = this.addNode({ kind: 'output', soma: cell, x: cell.strip, small: cell.small });
-      node.dendrites.push(this.newConnector(node, 'dendrite'));
+      for (let d = 0; d < this.p.outputDendrites; d += 1) node.dendrites.push(this.newConnector(node, 'dendrite'));
       this.outputs.push(node);
     });
   }
