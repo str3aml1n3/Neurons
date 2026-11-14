@@ -435,6 +435,47 @@ and a higher minimum threshold.
   (Hebbian plasticity, STDP), with dopamine modulating it. That would let a
   selective neuron's coincident inputs consolidate before any reward arrives.
 
+### Hebbian (STDP) experiments
+
+Spike-timing-dependent plasticity changes synapses with no reward involved
+(off by default):
+
+- \`hebbRate\`: input that arrived up to 2 ticks *before* a neuron fired is
+  strengthened by this much;
+- \`hebbDepress\`: input that arrives up to 2 ticks *after* it fired is
+  weakened by this much;
+- \`hebbTrophic\`: each helpful arrival also earns this much trophic support
+  (activity-dependent survival).
+
+When scaling is also on, each neuron rescales its inputs right after its
+Hebbian change: Hebbian growth plus normalization, the classic recipe
+(Oja's and BCM rules) for selective feature detectors.
+
+| Setting (networks 1–10) | Balanced accuracy | Answers per run | Digits an active neuron fires for |
+| --- | --- | --- | --- |
+| Baseline | 74.0% | 791 | 5.5 |
+| STDP 0.02 or 0.05 | 71.7–73.1% | ~835 | 6.2–6.4 |
+| STDP + support | 66.2% | 806 | 6.0 |
+| NMDA + weak synapses + STDP + support | 57.8–61.6% | 609–741 | 5.0–6.2 |
+| STDP + scaling 0.1–0.3 | 70.7–72.3% | ~830 | 5.6–6.1 |
+| STDP + full scaling | 57.2% | 808 | 5.3 |
+| NMDA + weak + STDP + support + scaling 0.3 | 70.1% | 376 | 3.6 |
+
+- **STDP keeps the network active**, which rescues the quiet NMDA networks
+  (answers rise from about 300 to 600–740).
+- **But it undoes selectivity.** It strengthens whatever fires a neuron, so
+  neurons drift back toward responding to most digits. This is the known
+  weakness of Hebbian learning without competition.
+- **Pairing it with scaling didn't fix that.** Gentle scaling came within 2
+  points of the baseline; full scaling hurt badly. The one variant that kept
+  neurons selective (3.6 digits) still ran too quietly to answer well.
+
+**Overall:** across all the learning experiments (synaptic scaling, timing
+credit, retry protocol, connector lifecycle, fire together, sparse firing,
+NMDA-like boost, STDP), no mechanism improved on the baseline's ~74% balanced
+accuracy consistently. Elimination is the only one kept on, because it keeps
+accuracy with a third fewer synapses. The rest stay available as parameters.
+
 ## What you see
 
 | Visual | Meaning |
@@ -519,4 +560,7 @@ All values live in `PARAMS` in [`web/brain.js`](../web/brain.js).
 | `coactivityGain` | 0 (off) | Experimental: "fire together, wire together" bias toward co-active partners |
 | `nmdaGain` | 0 (off) | Experimental: multiplier for input arriving while the neuron is already charged |
 | `nmdaVoltage` | 0.3 | Experimental: charge above which the NMDA-like boost applies |
+| `hebbRate` | 0 (off) | Experimental STDP: weight gain for input that arrived just before the neuron fired |
+| `hebbDepress` | 0 (off) | Experimental STDP: weight loss for input that arrived just after it fired |
+| `hebbTrophic` | 0 | Experimental STDP: trophic support earned per helpful arrival |
 | `pause` | 12 | Ticks between trials |

@@ -73,6 +73,10 @@ export const PARAMS = {
   coactivityGain: 0, // "fire together, wire together": bias toward co-active partners (0 = off)
   nmdaGain: 0, // NMDA-like boost for input arriving while already charged (0 = off)
   nmdaVoltage: 0.3, // charge above which the boost applies
+  // Hebbian learning by spike timing (STDP), with no reward needed (off by default):
+  hebbRate: 0, // weight gain for input that arrived just before the neuron fired
+  hebbDepress: 0, // weight loss for input that arrived just after it fired
+  hebbTrophic: 0, // trophic support earned per helpful arrival
   reward: 0.2,
   punish: 0.2,
   pause: 12,
@@ -645,6 +649,12 @@ export class Brain {
         if (this.p.nmdaGain && synapse.to.potential > this.p.nmdaVoltage) charge *= this.p.nmdaGain;
         synapse.to.potential += charge;
         synapse.lastArrival = this.tick;
+        // STDP, depression side: input arriving just after the neuron fired
+        // did not help that firing, so it weakens a little (no reward needed).
+        const sinceFired = this.tick - synapse.to.lastFired;
+        if (this.p.hebbDepress && sinceFired > 0 && sinceFired <= this.p.coincidence) {
+          this.hebbChange(synapse, -this.p.hebbDepress);
+        }
       }
       return false;
     });
@@ -667,6 +677,10 @@ export class Brain {
     target.shunt = Math.min(1, target.shunt + pull);
   }
 
+  hebbChange(synapse, amount) {
+    synapse.weight = Math.max(this.p.minWeight, Math.min(this.p.maxWeight, synapse.weight + amount));
+  }
+
   fireNeurons() {
     this.neurons.forEach((neuron) => {
       if (neuron.potential < neuron.threshold || neuron.refractory > 0) return;
@@ -679,9 +693,19 @@ export class Brain {
           neuron.contrib.add(s);
           const late = this.tick - s.lastArrival; // 0 = arrived in the firing tick
           s.credit = Math.max(s.credit ?? 0, this.p.timingCredit ? this.p.timingCredit ** late : 1);
+          // STDP, potentiation side: input that helped fire the neuron
+          // strengthens a little, and earns a little support for being used.
+          if (this.p.hebbRate) {
+            this.hebbChange(s, this.p.hebbRate);
+            s.trophic = Math.min(this.p.trophicMax, s.trophic + this.p.hebbTrophic);
+          }
         }
         if (s.from === neuron) this.emit(s);
       });
+      // Hebbian growth paired with scaling (an Oja-like rule): after
+      // strengthening the inputs that fired it, the neuron rescales its inputs
+      // toward its budget, so the inputs compete.
+      if (this.p.hebbRate && this.p.scaling) this.scaleInputs([neuron]);
     });
   }
 
