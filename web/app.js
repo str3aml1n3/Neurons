@@ -170,7 +170,7 @@ gridGeometry.setAttribute('position', new THREE.Float32BufferAttribute(gridPosit
 const grid = new THREE.LineSegments(
   gridGeometry,
   new THREE.LineBasicMaterial({
-    color: 0x58bce8, transparent: true, opacity: 0.42, depthWrite: false,
+    color: 0x58bce8, transparent: true, opacity: 0.26, depthWrite: false,
   }),
 );
 cube.add(grid);
