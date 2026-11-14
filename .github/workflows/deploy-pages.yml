@@ -33,8 +33,10 @@ jobs:
           version="${GITHUB_SHA::8}"
           sed -i -e "s#\./app\.js\"#./app.js?v=${version}\"#" \
                  -e "s#\./styles\.css\"#./styles.css?v=${version}\"#" web/index.html
+          sed -i -e "s#'\./brain\.js'#'./brain.js?v=${version}'#" web/app.js
           grep -q "app.js?v=${version}" web/index.html
           grep -q "styles.css?v=${version}" web/index.html
+          grep -q "brain.js?v=${version}" web/app.js
       - uses: actions/upload-pages-artifact@v3.0.1
         with:
           path: web

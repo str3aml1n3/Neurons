@@ -1,8 +1,19 @@
 :root {
   color-scheme: dark;
+  --bg: #060b17;
+  --text: #f4f7ff;
+  --muted: #8ca2c0;
+  --neuron: #eef6ff;
+  --dendrite: #4fd8e8;
+  --axon: #ff8a5c;
+  --synapse: #b7ff6a;
+  --spike: #fff6c2;
+  --small: #3f7dff;
+  --big: #ff4d5e;
+  --gold: #ffc64b;
   font-family: Inter, ui-sans-serif, system-ui, sans-serif;
-  background: #080e1c;
-  color: #f4f7ff;
+  background: var(--bg);
+  color: var(--text);
 }
 
 * {
@@ -12,56 +23,108 @@
 body {
   margin: 0;
   min-width: 320px;
-  min-height: 100vh;
-  background: radial-gradient(circle at 50% 25%, #172b50 0%, #080e1c 55%, #050913 100%);
+  background: radial-gradient(circle at 50% 35%, #142647 0%, var(--bg) 60%, #03060d 100%);
+  overflow: hidden;
 }
 
 main {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  min-height: 100vh;
+  position: relative;
+  height: 100vh;
+  height: 100dvh;
 }
 
+#scene-wrap {
+  position: absolute;
+  inset: 0;
+}
+
+canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+/* HUD bars float over the canvas so the cube can use the whole screen. */
 .hud {
+  position: absolute;
+  left: 0;
+  right: 0;
   z-index: 1;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 1rem clamp(1rem, 4vw, 3rem);
-  background: linear-gradient(180deg, rgb(5 10 21 / 88%), transparent);
+  padding-inline: max(1rem, env(safe-area-inset-left)) max(1rem, env(safe-area-inset-right));
   pointer-events: none;
 }
 
+.top {
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding-block: max(0.9rem, env(safe-area-inset-top)) 2rem;
+  background: linear-gradient(180deg, rgb(4 8 18 / 92%), transparent);
+}
+
+.bottom {
+  bottom: 0;
+  display: grid;
+  gap: 0.45rem;
+  padding-block: 2rem max(0.9rem, env(safe-area-inset-bottom));
+  background: linear-gradient(0deg, rgb(4 8 18 / 94%), transparent);
+}
+
+.title {
+  margin-right: auto;
+}
+
 .eyebrow {
-  margin: 0 0 0.25rem;
+  margin: 0 0 0.2rem;
   color: #76cce2;
   font-size: 0.7rem;
   font-weight: 700;
   letter-spacing: 0.14em;
+  text-transform: uppercase;
 }
 
 h1 {
   margin: 0;
-  font-size: clamp(1.7rem, 4vw, 2.8rem);
+  font-size: clamp(1.4rem, 4vw, 2.6rem);
   letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 
-#subtitle, .footer p {
-  margin: 0.35rem 0 0;
-  color: #c4d2e8;
-  font-size: 0.9rem;
+.digit-card {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.35rem 0.8rem 0.35rem 0.6rem;
+  border: 1px solid rgb(255 198 75 / 35%);
+  border-radius: 0.8rem;
+  background: rgb(255 198 75 / 8%);
 }
 
-#subtitle span {
-  margin-left: 0.5rem;
-  color: #8ca2c0;
+.digit-card strong {
+  min-width: 1.1ch;
+  color: var(--gold);
+  font-size: 2.2rem;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
 }
+
+.digit-card span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.digit-card .small { color: var(--small); }
+.digit-card .big { color: var(--big); }
 
 button {
+  min-height: 2.75rem;
   border: 1px solid #6bd4dc;
   border-radius: 999px;
-  padding: 0.65rem 1rem;
+  padding: 0.6rem 1.1rem;
   color: #07101f;
   background: #8ee8df;
   font: inherit;
@@ -74,70 +137,132 @@ button:hover {
   background: #c6fff5;
 }
 
-#scene-wrap {
-  min-height: 0;
+button:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
 }
 
-canvas {
-  display: block;
-  width: 100%;
-  height: 100%;
-  touch-action: none;
-}
-
-.footer {
-  flex-wrap: wrap;
-  justify-content: flex-start;
-  background: linear-gradient(0deg, rgb(5 10 21 / 90%), transparent);
+.bottom p {
+  margin: 0;
 }
 
 #status {
   color: #d7edff;
+  font-size: 1rem;
   font-weight: 700;
 }
 
+#status.reward {
+  color: var(--gold);
+}
+
+.stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+  color: #c4d2e8;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
 #score {
-  color: #ffd567;
+  color: var(--gold);
 }
 
-#hint {
-  margin-left: auto;
-  color: #8ca2c0;
-}
-
-#legend {
-  width: 100%;
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.9rem;
+  margin: 0;
+  padding: 0;
   color: #9eb4d2;
+  font-size: 0.8rem;
+  list-style: none;
 }
 
-#legend span {
-  font-weight: 800;
+.legend li {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
 }
 
-#legend .input {
-  color: #63e9dc;
+.swatch {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 0.15rem;
 }
 
-#legend .hidden {
-  color: #aa8cff;
+.swatch.neuron { border-radius: 50%; background: var(--neuron); box-shadow: 0 0 6px var(--dendrite); }
+.swatch.dendrite { height: 0.25rem; background: var(--dendrite); }
+.swatch.axon { height: 0.25rem; background: var(--axon); }
+.swatch.synapse { background: var(--synapse); }
+.swatch.spike { border-radius: 50%; background: var(--spike); box-shadow: 0 0 8px 2px #ffd35a; }
+.swatch.small { background: var(--small); }
+.swatch.big { background: var(--big); }
+
+.hint {
+  color: var(--muted);
+  font-size: 0.78rem;
 }
 
-#legend .output {
-  color: #ff83bf;
-}
+/* Phones in portrait. */
+@media (max-width: 600px) {
+  .top {
+    gap: 0.6rem;
+  }
 
-@media (max-width: 650px) {
-  .hud {
-    align-items: flex-start;
-    padding: 0.9rem 1rem;
+  .eyebrow {
+    display: none;
+  }
+
+  .digit-card {
+    padding: 0.25rem 0.6rem 0.25rem 0.5rem;
+  }
+
+  .digit-card strong {
+    font-size: 1.8rem;
   }
 
   button {
-    padding: 0.55rem 0.8rem;
+    padding: 0.5rem 0.9rem;
   }
 
-  #hint {
-    width: 100%;
-    margin-left: 0;
+  #status {
+    font-size: 0.92rem;
+  }
+
+  .stats {
+    font-size: 0.78rem;
+  }
+
+  .legend {
+    gap: 0.25rem 0.7rem;
+    font-size: 0.72rem;
+  }
+}
+
+/* Phones in landscape: keep the bars thin so the cube stays visible. */
+@media (max-height: 500px) {
+  .top {
+    padding-block: max(0.5rem, env(safe-area-inset-top)) 1rem;
+  }
+
+  .eyebrow,
+  .hint {
+    display: none;
+  }
+
+  h1 {
+    font-size: 1.2rem;
+  }
+
+  .bottom {
+    grid-template-columns: auto 1fr;
+    align-items: center;
+    padding-block: 1rem max(0.5rem, env(safe-area-inset-bottom));
+  }
+
+  .legend {
+    grid-column: 1 / -1;
   }
 }

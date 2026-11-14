@@ -1,0 +1,178 @@
+# Neuron behavior
+
+How the simulation in [`web/brain.js`](../web/brain.js) works, in plain
+language. This document is kept in sync with the code: when the simulation
+changes, update this file in the same commit.
+
+It is an educational toy, not a biologically accurate model.
+
+## The world
+
+- The cube is a 9 × 9 × 9 grid of **cells**.
+- **A cell holds at most one thing**: a neuron body, one piece of a connector,
+  a synapse, or a digit or output cell.
+- Everything moves and grows in **whole cells**. A connector steps into one of
+  the 6 neighboring cells (left, right, up, down, forward, back). There are no
+  diagonal or partial steps.
+
+## Nodes
+
+Three kinds of node send and receive signals.
+
+| Node | Where | Grows | Role |
+| --- | --- | --- | --- |
+| **Neuron** | 16 random cells inside the cube, at least 2 cells apart | 1–3 dendrites and 1–3 axons | Adds up incoming signals and fires |
+| **Digit segment** (input) | 7 segments on the front face, 2–3 cells each | 1 axon, from a random cell of the segment | Sends signals while lit |
+| **Output cell** | 8 cells of the strip on the back face | 1 dendrite | Collects votes: left half *small*, right half *big* (the middle cell is neutral) |
+
+Signals have a direction: **dendrites carry signals in, axons carry them out.**
+
+## Growth
+
+Every 2 ticks, each growing connector tries to step one cell from its tip.
+
+- **Goal.** Each connector heads for a goal cell, picked when it starts
+  growing:
+  - Digit axons and output dendrites aim at a random neuron.
+  - A neuron's axon aims at another neuron or the output strip (50/50).
+  - A neuron's dendrite aims at another neuron or the digit (50/50).
+- **Drift.** 60% of steps move closer to the goal. The rest go in a random
+  direction, so paths wander.
+- **Blocked.** A step into an occupied cell that doesn't form a synapse is
+  blocked. After 7 blocked steps in a row, the connector retracts.
+- **Too long.** A connector that grows to 10 cells without connecting retracts.
+- **Retracting** pulls back one cell per tick. Once fully retracted, the
+  connector picks a new goal and grows again.
+
+## Synapses
+
+A **synapse** forms when a growing tip steps into a cell held by the opposite
+kind of connector:
+
+- an axon tip entering a cell of a growing dendrite, or
+- a dendrite tip entering a cell of a growing axon.
+
+The connector that was entered is cut back to that cell, and the cell becomes
+the synapse. Each connector has at most one synapse; once connected, both stop
+growing.
+
+Digit and output cells also connect directly, without growing anything:
+
+- A neuron's **dendrite** that reaches a **digit cell** connects to that segment.
+- A neuron's **axon** that reaches an **output cell** connects to it.
+
+Signals always pass through at least one neuron. A digit's axon cannot connect
+to an output's dendrite, and nothing connects a node to itself.
+
+Every synapse has a **weight** (strength), starting at 1.0 and kept between
+0.05 and 2.0.
+
+## Signals and firing
+
+Time runs in **ticks** (10 per second in the browser).
+
+1. **Input.** Every 5 ticks, each lit digit segment sends a signal through all
+   of its synapses.
+2. **Travel.** A signal (spike) moves one cell per tick, along the axon to the
+   synapse and then along the dendrite to the receiving body.
+3. **Charge.** When a signal arrives, the neuron's **charge** rises by the
+   synapse's weight. Every tick the charge leaks to 70% of its value and gains
+   a little random noise.
+4. **Fire.** When the charge reaches the neuron's **threshold**, the neuron
+   fires: its charge resets to 0, it sends a signal down every connected axon,
+   and it rests for 4 ticks.
+5. **Adaptive threshold.** Thresholds start at 1.0. Each firing raises the
+   threshold by 0.08, and every tick lowers it by 0.004, kept between 0.5 and
+   2.5. Busy neurons calm down and silent neurons wake up, so the network never
+   goes permanently quiet.
+
+A neuron with a strong synapse (weight ≥ threshold) fires from one signal. With
+weaker synapses it needs several signals arriving close together, so it can
+respond to a *combination* of lit segments.
+
+## Answering
+
+- A signal that reaches an output cell adds the synapse's weight to that
+  side's **vote** (*small* or *big*).
+- At tick 35 of a trial, the side with more votes is the network's answer.
+  On a tie (including no votes) the trial continues until one side leads.
+- If no answer comes by tick 60, the trial ends without learning and restarts
+  after a pause.
+
+## Learning (dopamine)
+
+After an answer, the simulation finds the synapses **responsible** for it:
+
+1. Start with the output synapses that voted for the chosen side.
+2. Add every synapse that helped fire the neurons that sent those votes. A
+   synapse helped a firing if its signal arrived within 2 ticks before it.
+3. Repeat back through the network, all the way to the digit.
+
+Then:
+
+- **Correct:** dopamine is released, and each responsible synapse is
+  strengthened by +0.2. A new digit is shown.
+- **Wrong:** no dopamine, each responsible synapse is weakened by −0.2, and
+  the same digit is shown again.
+
+Synapses that didn't contribute to the answer are not changed.
+
+## Pruning and regrowth
+
+- A synapse whose weight drops below 0.3 is **pruned**.
+- A synapse that hasn't carried a signal for 1,500 ticks is pruned too.
+
+When a synapse is pruned, both connectors retract and grow again toward new
+goals. Over time, unhelpful wiring is replaced by new attempts.
+
+## How well it learns
+
+The headless test (`node tests/brain.test.mjs`) runs 5 random networks for
+30,000 ticks each. Over each run's last 300 answers, accuracy averages about
+**60%** (chance is 50%). It learns, but only modestly. Excitatory-only neurons,
+a small network and very simple credit assignment limit how far it gets.
+
+## What you see
+
+| Visual | Meaning |
+| --- | --- |
+| White sphere with a halo | Neuron body. The halo brightens as charge builds and flashes gold when it fires. |
+| Cyan tube | Dendrite (signals in) |
+| Coral tube | Axon (signals out) |
+| Tube thickness | Synapse weight, once connected |
+| Faint tinted cube | A cell occupied by a connector |
+| Lime cube | Synapse; larger means stronger. Responsible synapses flash on dopamine. |
+| Glowing dot with a trail | A signal traveling one cell per tick |
+| Gold cells (front) | Digit segments; bright when lit |
+| Blue and red cells (back) | Output strip: blue = small, red = big |
+| Gold cube outline | Dopamine is being released |
+
+## Parameters
+
+All values live in `PARAMS` in [`web/brain.js`](../web/brain.js).
+
+| Parameter | Value | Meaning |
+| --- | --- | --- |
+| `neurons` | 16 | Number of neurons |
+| `maxConnectors` | 3 | Max dendrites and max axons per neuron |
+| `maxLength` | 10 | Cells a connector may grow without connecting |
+| `stuckLimit` | 6 | Blocked steps tolerated before retracting |
+| `growEvery` | 2 | Ticks between growth steps |
+| `drift` | 0.6 | Chance a step moves toward the goal |
+| `initialWeight` | 1 | Weight of a new synapse |
+| `maxWeight` / `minWeight` | 2 / 0.05 | Weight limits |
+| `pruneBelow` | 0.3 | Weight below which a synapse is pruned |
+| `unusedPrune` | 1500 | Idle ticks before a synapse is pruned |
+| `threshold` | 1 | Starting firing threshold |
+| `minThreshold` / `maxThreshold` | 0.5 / 2.5 | Threshold limits |
+| `thresholdRecovery` | 0.004 | Threshold drop per tick |
+| `thresholdBoost` | 0.08 | Threshold rise per firing |
+| `leak` | 0.7 | Share of charge kept each tick |
+| `noise` | 0.08 | Max random charge added per tick |
+| `refractory` | 4 | Rest ticks after firing |
+| `coincidence` | 2 | Ticks within which an arrival counts toward a firing |
+| `inputPeriod` | 5 | Ticks between signals from a lit segment |
+| `window` | 35 | Trial tick when votes are compared |
+| `trialTicks` | 60 | Trial length before giving up |
+| `reward` / `punish` | 0.2 / 0.2 | Weight change after a correct / wrong answer |
+| `pause` | 12 | Ticks between trials |

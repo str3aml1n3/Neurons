@@ -2,29 +2,47 @@
 <html lang="en">
   <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="An interactive Three.js neural-network toy.">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#060b17">
+    <meta name="description" content="An interactive Three.js toy: voxel neurons grow, connect and learn from dopamine.">
     <title>Neurons</title>
     <link rel="stylesheet" href="./styles.css">
   </head>
   <body>
     <main>
-      <header class="hud">
-        <div>
-          <p class="eyebrow">INTERACTIVE NEURAL TOY</p>
-          <h1>NEURONS</h1>
-          <p id="subtitle">Digit: <strong id="digit">0</strong> <span>Small: 0-4 / Big: 5-9</span></p>
-        </div>
-        <button id="reset" type="button">Reset simulation</button>
-      </header>
-      <section id="scene-wrap" aria-label="Rotatable neural-network cube">
+      <section id="scene-wrap" aria-label="Rotatable cube of growing neurons">
         <canvas id="scene"></canvas>
       </section>
-      <footer class="hud footer">
+
+      <header class="hud top">
+        <div class="title">
+          <p class="eyebrow">Interactive neural toy</p>
+          <h1>Neurons</h1>
+        </div>
+        <div class="digit-card" aria-label="Current digit">
+          <strong id="digit">0</strong>
+          <span>0–4 <b class="small">small</b><br>5–9 <b class="big">big</b></span>
+        </div>
+        <button id="reset" type="button" aria-label="Reset simulation">Reset</button>
+      </header>
+
+      <footer class="hud bottom">
         <p id="status" aria-live="polite">Growing connections</p>
-        <p id="score">Rewards: 0 / 0</p>
-        <p id="hint">Drag to rotate. Gold segments are inputs; blue to red is the output.</p>
-        <p id="legend"><span class="input">Cyan</span> input layer <span class="hidden">Violet</span> hidden layer <span class="output">Pink</span> output layer</p>
+        <p class="stats">
+          <span id="score">Correct 0 / 0</span>
+          <span id="recent">Last 50: –</span>
+          <span id="synapses">Synapses 0</span>
+        </p>
+        <ul class="legend" aria-label="Legend">
+          <li><i class="swatch neuron"></i>Neuron</li>
+          <li><i class="swatch dendrite"></i>Dendrite (in)</li>
+          <li><i class="swatch axon"></i>Axon (out)</li>
+          <li><i class="swatch synapse"></i>Synapse</li>
+          <li><i class="swatch spike"></i>Signal</li>
+          <li><i class="swatch small"></i>Small</li>
+          <li><i class="swatch big"></i>Big</li>
+        </ul>
+        <p class="hint">Drag to rotate · pinch or scroll to zoom</p>
       </footer>
     </main>
     <script type="importmap">
