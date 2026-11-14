@@ -491,6 +491,42 @@ NMDA-like boost, STDP), no mechanism improved on the baseline's ~74% balanced
 accuracy consistently. Elimination is the only one kept on, because it keeps
 accuracy with a third fewer synapses. The rest stay available as parameters.
 
+### Winner-take-all experiments
+
+Diehl & Cook (2015) reached 95% on handwritten digits with no labels, using
+STDP, an adaptive threshold, input normalization and **lateral inhibition**:
+each excitatory neuron, through an inhibitory partner, suppresses all the
+others, so neurons compete and each specializes on one pattern. With
+\`lateralMode\` (off by default), a firing neuron inhibits the excitatory
+neurons within \`lateralRadius\` cells, pulling their charge
+\`lateralStrength\` of the way to the inhibition floor:
+
+- \`'pool'\`: every excitatory neuron does this when it fires, standing in for
+  the dense local network of inhibitory cells around it;
+- \`'interneurons'\`: only the inhibitory neurons do, like basket cells.
+
+Neurons at threshold in the same tick fire strongest first, so a winner can
+push its neighbours back below threshold before their turn.
+
+| Setting (networks 1–10) | Balanced accuracy | Digits an active neuron fires for | Excitatory inputs per neuron |
+| --- | --- | --- | --- |
+| Baseline | 74.0% | 5.5 | 1.9 |
+| Pool, local or whole cube, with or without STDP | 70.0–74.4% | 4.8–6.1 | ~2 |
+| Interneurons + STDP | 67.6–72.4% | 5.8–5.9 | ~2 |
+| Up to 7 dendrites, no elimination (control) | 73.0% | 7.8 | 2.9 |
+| 7 dendrites + STDP + pool, with and without scaling (the full recipe) | 61.6–70.6% | 6.5–7.5 | 2.6–3.0 |
+
+- **Competition didn't make neurons specialize.** They still fire for 5–8 of
+  the 10 digits.
+- **The blocker is fan-in.** In Diehl & Cook every neuron sees every input,
+  so competition can carve out a whole-digit template. Here a neuron sees 2–3
+  of the 14 digit channels, because each dendrite carries one synapse and has
+  to physically reach its partner. A neuron that sees one segment can't be more
+  selective than that segment, which is lit for most digits.
+- **Next step this points to:** dendrites that collect many synapses along
+  their length, as real dendrites do, so a neuron can gather enough inputs for
+  competition to work with.
+
 ## What you see
 
 | Visual | Meaning |
@@ -579,4 +615,7 @@ All values live in `PARAMS` in [`web/brain.js`](../web/brain.js).
 | `hebbRate` | 0 (off) | Experimental STDP: weight gain for input that arrived just before the neuron fired |
 | `hebbDepress` | 0 (off) | Experimental STDP: weight loss for input that arrived just after it fired |
 | `hebbTrophic` | 0 | Experimental STDP: trophic support earned per helpful arrival |
+| `lateralMode` | 'off' | Experimental winner-take-all: 'pool' (every excitatory neuron) or 'interneurons' (inhibitory neurons) inhibit neighbours when they fire |
+| `lateralRadius` | 3 | Reach of lateral inhibition in cells; 9 or more covers the cube |
+| `lateralStrength` | 0.5 | Share of the way to the inhibition floor per lateral hit |
 | `pause` | 12 | Ticks between trials |

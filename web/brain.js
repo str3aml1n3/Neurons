@@ -77,6 +77,11 @@ export const PARAMS = {
   hebbRate: 0, // weight gain for input that arrived just before the neuron fired
   hebbDepress: 0, // weight loss for input that arrived just after it fired
   hebbTrophic: 0, // trophic support earned per helpful arrival
+  // Lateral inhibition (winner-take-all), off by default:
+  lateralMode: 'off', // 'pool': each firing excitatory neuron inhibits its neighbours (as if
+  //   through local interneurons); 'interneurons': each firing inhibitory neuron does
+  lateralRadius: 3, // reach in cells (Chebyshev distance); 9 or more covers the cube
+  lateralStrength: 0.5, // share of the way to the inhibition floor per hit
   reward: 0.2,
   punish: 0.2,
   pause: 12,
@@ -182,6 +187,13 @@ export class Brain {
     // Connector objects are fixed after construction (they retract and regrow
     // but are never replaced), so the list is built once.
     this.connectorList = this.nodes.flatMap((n) => [...n.axons, ...n.dendrites]);
+    // Excitatory neurons within lateral-inhibition reach of each neuron
+    // (bodies never move, so this is computed once).
+    this.neurons.forEach((neuron) => {
+      neuron.neighbours = this.neurons.filter((other) => other !== neuron && !other.inhibitory
+        && Math.max(Math.abs(other.soma.x - neuron.soma.x), Math.abs(other.soma.y - neuron.soma.y),
+          Math.abs(other.soma.z - neuron.soma.z)) <= this.p.lateralRadius);
+    });
     this.digit = this.randInt(10);
     this.startTrial();
   }
@@ -681,32 +693,52 @@ export class Brain {
     synapse.weight = Math.max(this.p.minWeight, Math.min(this.p.maxWeight, synapse.weight + amount));
   }
 
+  // Without lateral inhibition, every neuron at threshold fires. With it,
+  // neurons fire strongest first (furthest above their threshold), and each
+  // firing can push its neighbours back below threshold before their turn.
   fireNeurons() {
-    this.neurons.forEach((neuron) => {
-      if (neuron.potential < neuron.threshold || neuron.refractory > 0) return;
-      neuron.potential = 0;
-      neuron.threshold = Math.min(this.p.maxThreshold, neuron.threshold + this.p.thresholdBoost);
-      neuron.refractory = this.p.refractory;
-      neuron.lastFired = this.tick;
-      this.synapses.forEach((s) => {
-        if (s.to === neuron && !s.inhibitory && this.tick - s.lastArrival <= this.p.coincidence) {
-          neuron.contrib.add(s);
-          const late = this.tick - s.lastArrival; // 0 = arrived in the firing tick
-          s.credit = Math.max(s.credit ?? 0, this.p.timingCredit ? this.p.timingCredit ** late : 1);
-          // STDP, potentiation side: input that helped fire the neuron
-          // strengthens a little, and earns a little support for being used.
-          if (this.p.hebbRate) {
-            this.hebbChange(s, this.p.hebbRate);
-            s.trophic = Math.min(this.p.trophicMax, s.trophic + this.p.hebbTrophic);
-          }
-        }
-        if (s.from === neuron) this.emit(s);
+    const ready = (neuron) => neuron.potential >= neuron.threshold && neuron.refractory <= 0;
+    if (this.p.lateralMode === 'off') {
+      this.neurons.forEach((neuron) => { if (ready(neuron)) this.fire(neuron); });
+      return;
+    }
+    this.neurons.filter(ready)
+      .sort((a, b) => (b.potential - b.threshold) - (a.potential - a.threshold))
+      .forEach((neuron) => {
+        if (!ready(neuron)) return; // inhibited by a stronger neighbour this tick
+        this.fire(neuron);
+        const inhibits = this.p.lateralMode === 'pool' ? !neuron.inhibitory : neuron.inhibitory;
+        if (!inhibits) return;
+        neuron.neighbours.forEach((other) => {
+          other.potential -= this.p.lateralStrength * (other.potential - this.p.inhibitionFloor);
+          other.shunt = Math.min(1, other.shunt + this.p.lateralStrength);
+        });
       });
-      // Hebbian growth paired with scaling (an Oja-like rule): after
-      // strengthening the inputs that fired it, the neuron rescales its inputs
-      // toward its budget, so the inputs compete.
-      if (this.p.hebbRate && this.p.scaling) this.scaleInputs([neuron]);
+  }
+
+  fire(neuron) {
+    neuron.potential = 0;
+    neuron.threshold = Math.min(this.p.maxThreshold, neuron.threshold + this.p.thresholdBoost);
+    neuron.refractory = this.p.refractory;
+    neuron.lastFired = this.tick;
+    this.synapses.forEach((s) => {
+      if (s.to === neuron && !s.inhibitory && this.tick - s.lastArrival <= this.p.coincidence) {
+        neuron.contrib.add(s);
+        const late = this.tick - s.lastArrival; // 0 = arrived in the firing tick
+        s.credit = Math.max(s.credit ?? 0, this.p.timingCredit ? this.p.timingCredit ** late : 1);
+        // STDP, potentiation side: input that helped fire the neuron
+        // strengthens a little, and earns a little support for being used.
+        if (this.p.hebbRate) {
+          this.hebbChange(s, this.p.hebbRate);
+          s.trophic = Math.min(this.p.trophicMax, s.trophic + this.p.hebbTrophic);
+        }
+      }
+      if (s.from === neuron) this.emit(s);
     });
+    // Hebbian growth paired with scaling (an Oja-like rule): after
+    // strengthening the inputs that fired it, the neuron rescales its inputs
+    // toward its budget, so the inputs compete.
+    if (this.p.hebbRate && this.p.scaling) this.scaleInputs([neuron]);
   }
 
   decide() {
