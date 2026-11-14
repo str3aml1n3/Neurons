@@ -146,8 +146,11 @@ const cube = new THREE.Group();
 scene.add(cube);
 const frame = new THREE.LineSegments(
   new THREE.EdgesGeometry(new THREE.BoxGeometry(8.7, 8.7, 8.7)),
-  new THREE.LineBasicMaterial({ color: 0x6da8c7, transparent: true, opacity: 0.78 }),
+  new THREE.LineBasicMaterial({
+    color: 0x88d9ff, transparent: true, opacity: 0.95, depthTest: false, depthWrite: false,
+  }),
 );
+frame.renderOrder = 4;
 cube.add(frame);
 const gridPositions = [];
 for (let a = -4; a <= 4; a += 1) {
@@ -159,14 +162,18 @@ for (let a = -4; a <= 4; a += 1) {
 }
 const gridGeometry = new THREE.BufferGeometry();
 gridGeometry.setAttribute('position', new THREE.Float32BufferAttribute(gridPositions, 3));
-cube.add(new THREE.LineSegments(
+const grid = new THREE.LineSegments(
   gridGeometry,
-  new THREE.LineBasicMaterial({ color: 0x3c7895, transparent: true, opacity: 0.2 }),
-));
+  new THREE.LineBasicMaterial({
+    color: 0x58bce8, transparent: true, opacity: 0.52, depthTest: false, depthWrite: false,
+  }),
+);
+grid.renderOrder = 3;
+cube.add(grid);
 const shell = new THREE.Mesh(
   new THREE.BoxGeometry(8.5, 8.5, 8.5),
   new THREE.MeshPhysicalMaterial({
-    color: 0x245878, transparent: true, opacity: 0.07, roughness: 0.18, transmission: 0.2,
+    color: 0x245878, transparent: true, opacity: 0.025, roughness: 0.18, transmission: 0.2, depthWrite: false,
   }),
 );
 cube.add(shell);
@@ -221,8 +228,12 @@ let brain = new Brain();
 const visuals = new Map();
 
 function lineFrom(points, color, opacity = 0.8) {
-  const material = new THREE.LineBasicMaterial({ color, transparent: true, opacity });
-  return new THREE.Line(new THREE.BufferGeometry().setFromPoints(points.map(pointToVector)), material);
+  const material = new THREE.LineBasicMaterial({
+    color, transparent: true, opacity, depthTest: false, depthWrite: false,
+  });
+  const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(points.map(pointToVector)), material);
+  line.renderOrder = 5;
+  return line;
 }
 
 function createVisuals() {
