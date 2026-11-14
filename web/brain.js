@@ -90,6 +90,9 @@ export const PARAMS = {
   enPassantEvery: 10, // ticks between looks for new contacts
   enPassantChance: 0.02, // chance per neighbouring pair per look
   maxContacts: 4, // en passant synapses per connector
+  // Mushroom-body learning (off by default): dopamine changes only the synapses
+  // onto the output strip; the inner network keeps the synapses it uses.
+  readoutOnly: false,
   reward: 0.2,
   punish: 0.2,
   pause: 12,
@@ -943,19 +946,10 @@ export class Brain {
     });
   }
 
-  learn(side) {
-    const correct = (side === 'small') === (this.digit < 5);
-    this.answer = side;
-    this.attempts += 1;
-    this.history.push(correct);
-    // Net change per synapse; applied (and reported) once all rules have run.
-    const deltas = new Map();
-    const change = (synapse, amount) => {
-      const credit = synapse.credit > 0 ? synapse.credit : 1;
-      deltas.set(synapse, (deltas.get(synapse) ?? 0) + amount * credit);
-    };
-    // Excitation: the chain behind the answer is strengthened if it was
-    // right and weakened if it was wrong.
+  // The default rule: the chain behind the answer is strengthened if it was
+  // right and weakened if it was wrong, and inhibition is judged by whom it
+  // suppressed.
+  learnEverywhere(side, correct, change) {
     const behindAnswer = this.eligible(side);
     behindAnswer.forEach((s) => change(s, correct ? this.p.reward : -this.p.punish));
     if (correct) this.shareTrophic([...behindAnswer]);
@@ -973,6 +967,38 @@ export class Brain {
       this.lastEligible.forEach((syn) => {
         [syn.from, syn.to].forEach((node) => { node.activity += 1; });
       });
+    }
+  }
+
+  // Mushroom-body rule: only output synapses learn. Each one that carried a
+  // signal this trial is strengthened if it feeds the correct side and weakened
+  // if it feeds the wrong side, as separate dopamine zones would do in a fly.
+  // The inner network has no reward learning; synapses that carried signals to
+  // the output keep their trophic support, whatever the outcome, so used
+  // wiring survives.
+  learnReadout(change) {
+    const correctSmall = this.digit < 5;
+    const readout = this.synapses.filter((syn) => syn.delivered && !syn.inhibitory && syn.to.kind === 'output');
+    readout.forEach((syn) => change(syn, syn.to.small === correctSmall ? this.p.reward : -this.p.punish));
+    this.shareTrophic([...this.chain(readout)]);
+    this.lastEligible = new Set(readout.filter((syn) => syn.to.small === correctSmall));
+  }
+
+  learn(side) {
+    const correct = (side === 'small') === (this.digit < 5);
+    this.answer = side;
+    this.attempts += 1;
+    this.history.push(correct);
+    // Net change per synapse; applied (and reported) once all rules have run.
+    const deltas = new Map();
+    const change = (synapse, amount) => {
+      const credit = synapse.credit > 0 ? synapse.credit : 1;
+      deltas.set(synapse, (deltas.get(synapse) ?? 0) + amount * credit);
+    };
+    if (this.p.readoutOnly) {
+      this.learnReadout(change);
+    } else {
+      this.learnEverywhere(side, correct, change);
     }
     let strengthened = 0;
     let weakened = 0;

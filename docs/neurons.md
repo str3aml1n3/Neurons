@@ -584,9 +584,45 @@ removed first.
 - **But accuracy drops by 6–12 points.** Neurons fire for 8–9 of the 10 digits:
   each extra input is one more way to fire, so they become broad OR gates.
   Even the strongest competition tried here didn't make them selective.
-- So fan-in was not the blocker by itself. What keeps the network near 74% is
-  that its neurons don't become selective detectors, whether they have few
-  inputs or many.
+- So fan-in was not the blocker by itself.
+
+### Mushroom-body experiment, and where the accuracy is lost
+
+In a fruit fly's mushroom body, a randomly wired middle layer turns smells into
+patterns, and dopamine changes only the synapses onto the output neurons. With
+\`readoutOnly\` on (off by default), only output-strip synapses learn: each one
+that carried a signal this trial is strengthened if it feeds the correct side
+and weakened if it feeds the wrong side. Inner synapses don't learn from reward;
+those that carried signals to the output keep their trophic support, so used
+wiring survives.
+
+| Setting (networks 1–10) | Balanced accuracy | Synapses onto the outputs |
+| --- | --- | --- |
+| Baseline | 74.0% | ~10 |
+| Mushroom (with or without weight pruning, 3 output dendrites) | 50.7–51.4% | 6–12 |
+| Mushroom + en passant (several variants) | 44.0–48.3% | 9–33 |
+
+It learned nothing: chance level. To find out why, a test recorded which
+neurons fired in each trial and trained a simple weighted-sum readout (a
+perceptron) on half of the trials, then scored it on the other half (5
+networks each):
+
+| Network | Its own answers | Simple readout on which neurons fired, unseen trials |
+| --- | --- | --- |
+| Baseline | 69% | **89%** |
+| Mushroom + en passant | 52% | 63% |
+
+- **The baseline network's neurons carry enough information for about 89%.**
+  The neurons are informative; about 20 points are lost in the readout.
+- **The readout loses it** because each neuron reaches only one output half
+  through a few grown synapses, can't vote *against* a side, and most neurons
+  have no path to the side they would predict.
+- **Mushroom learning failed twice over:** without inner learning the neurons
+  carry less information (63%), and the readout has the same one-sided wiring.
+- **Most promising next step:** keep the default learning, which makes neurons
+  informative, and give it a readout that can use them: each neuron projecting
+  to both output halves, with learned weights, as output neurons in real brains
+  sample from very many upstream cells.
 
 ## What you see
 
@@ -685,4 +721,5 @@ All values live in `PARAMS` in [`web/brain.js`](../web/brain.js).
 | `enPassantEvery` | 10 | Ticks between looks for new en passant contacts |
 | `enPassantChance` | 0.02 | Chance per neighbouring pair per look |
 | `maxContacts` | 4 | En passant synapses per connector |
+| `readoutOnly` | false | Experimental mushroom-body rule: dopamine changes only output-strip synapses |
 | `pause` | 12 | Ticks between trials |
