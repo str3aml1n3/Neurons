@@ -245,8 +245,10 @@ const grid = new THREE.LineSegments(
 cube.add(grid);
 const shell = new THREE.Mesh(
   new THREE.BoxGeometry(8.98, 8.98, 8.98),
-  new THREE.MeshPhysicalMaterial({
-    color: 0x245878, transparent: true, opacity: 0.025, roughness: 0.18, transmission: 0.2, depthWrite: false,
+  // No transmission: it makes three.js render the whole scene a second time
+  // every frame, which is far too costly for a shell at 2.5% opacity.
+  new THREE.MeshStandardMaterial({
+    color: 0x245878, transparent: true, opacity: 0.025, roughness: 0.18, depthWrite: false,
   }),
 );
 cube.add(shell);
@@ -364,7 +366,16 @@ function tubeFromGridPoints(points, color, radius, opacity, seed) {
   return tubeFromVectors(points.map(pointToVector), color, radius, opacity, seed);
 }
 
+// Rebuilding a TubeGeometry allocates and uploads new GPU buffers, so skip it
+// unless the path or thickness changed. Axons and dendrites only change by
+// appending a point or resetting, so point count, last point and radius
+// identify the shape.
 function updateTube(tube, points, areVectors = false, radius = tube.userData.radius) {
+  const last = points.at(-1);
+  if (tube.userData.length === points.length && tube.userData.last === last
+    && tube.userData.radius === radius) return;
+  tube.userData.length = points.length;
+  tube.userData.last = last;
   tube.geometry.dispose();
   tube.userData.radius = radius;
   const curve = curveFromVectors(areVectors ? points : points.map(pointToVector), tube.userData.seed);
@@ -416,9 +427,7 @@ function syncVisuals() {
   brain.neurons.forEach((neuron) => {
     const visual = visuals.get(neuron);
     updateTube(visual.dendrite, neuron.dendrite);
-    neuron.edges.forEach((edge, index) => updateTube(
-      visual.edges[index], edgeDisplayPoints(edge), true, edgeRadius(edge),
-    ));
+    neuron.edges.forEach((edge, index) => updateTube(visual.edges[index], edge.axon, false, edgeRadius(edge)));
   });
   digitElement.textContent = brain.digit;
   statusElement.textContent = brain.dopamine > 0.1 ? `${brain.status}  DOPAMINE` : brain.status;
@@ -490,8 +499,14 @@ function updateSignalFlow(time) {
   signalGroup.visible = true;
 }
 
+let lastWidth = 0;
+let lastHeight = 0;
 function resize() {
   const { clientWidth: width, clientHeight: height } = canvas;
+  // setSize reallocates the drawing buffer, so only call it when the size changes.
+  if (width === lastWidth && height === lastHeight) return;
+  lastWidth = width;
+  lastHeight = height;
   renderer.setSize(width, height, false);
   camera.aspect = width / height;
   camera.updateProjectionMatrix();
