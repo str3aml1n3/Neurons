@@ -17,6 +17,7 @@ class Brain {
     this.rewards = 0;
     this.attempts = 0;
     this.dopamine = 0;
+    this.outputPulse = null;
     this.status = 'Growing connections';
     this.digit = Math.floor(Math.random() * 10);
     this.layers = Array.from({ length: 3 }, (_, layer) => POSITIONS.map(([x, y]) => {
@@ -40,6 +41,10 @@ class Brain {
   step() {
     this.ticks += 1;
     this.dopamine *= 0.9;
+    if (this.outputPulse) {
+      this.outputPulse.intensity *= 0.9;
+      if (this.outputPulse.intensity < 0.05) this.outputPulse = null;
+    }
     this.neurons.forEach((neuron) => {
       if (neuron.dendrite.length < 3 && this.ticks % 3 === 0) {
         const point = neuron.dendrite.at(-1);
@@ -71,6 +76,7 @@ class Brain {
 
     this.attempts += 1;
     const smallOutput = this.signal.destination.x < SIZE / 2;
+    this.outputPulse = { x: this.signal.destination.x, intensity: 1 };
     if (smallOutput === (this.digit < 5)) {
       this.rewards += 1;
       this.dopamine = 1;
@@ -221,8 +227,14 @@ for (let x = 0; x < SIZE; x += 1) {
   const cell = new THREE.Mesh(outputGeometry, material);
   cell.position.set(x - 4, 0, 4.51);
   cube.add(cell);
-  outputCells.push(cell);
+  outputCells.push({ cell, x });
 }
+const outputPulseMesh = new THREE.Mesh(
+  new THREE.SphereGeometry(0.42, 18, 12),
+  new THREE.MeshBasicMaterial({ color: 0xfff0a3, transparent: true, opacity: 0.75, depthWrite: false }),
+);
+outputPulseMesh.visible = false;
+cube.add(outputPulseMesh);
 
 const neuronGroup = new THREE.Group();
 cube.add(neuronGroup);
@@ -333,15 +345,13 @@ function updateTube(tube, points, areVectors = false, radius = tube.userData.rad
 function createVisuals() {
   neuronGroup.clear();
   visuals.clear();
-  brain.neurons.forEach((neuron, neuronIndex) => {
+  brain.neurons.forEach((neuron) => {
     const style = layerStyles[neuron.layer];
     const soma = new THREE.Mesh(somaGeometry, new THREE.MeshStandardMaterial({
       color: style.soma, emissive: style.emissive, emissiveIntensity: 1.2,
     }));
     soma.position.copy(pointToVector(neuron.soma));
     neuronGroup.add(soma);
-    const dendrite = tubeFromGridPoints(neuron.dendrite, style.line, 0.025, 0.72, 100 + neuronIndex);
-    neuronGroup.add(dendrite);
     const edges = neuron.edges.map((edge) => {
       const tube = tubeFromVectors(
         edgeDisplayPoints(edge), style.line, edgeRadius(edge), 0.95, edge.curveSeed,
@@ -349,7 +359,7 @@ function createVisuals() {
       neuronGroup.add(tube);
       return tube;
     });
-    visuals.set(neuron, { dendrite, edges });
+    visuals.set(neuron, { edges });
   });
 }
 
@@ -372,7 +382,6 @@ function createSensoryLinks() {
 function syncVisuals() {
   brain.neurons.forEach((neuron) => {
     const visual = visuals.get(neuron);
-    updateTube(visual.dendrite, neuron.dendrite);
     neuron.edges.forEach((edge, index) => updateTube(
       visual.edges[index], edgeDisplayPoints(edge), true, edgeRadius(edge),
     ));
@@ -396,6 +405,25 @@ function updateSensoryActivation(time) {
     link.tube.visible = lit;
     link.tube.material.opacity = selected ? 0.95 : 0.22 + 0.35 * (0.5 + 0.5 * Math.sin(phase + index));
   });
+}
+
+function updateOutputActivation(time) {
+  const pulse = brain.outputPulse;
+  outputCells.forEach(({ cell, x }) => {
+    const active = pulse && x === pulse.x;
+    cell.material.emissiveIntensity = active ? 1.4 + pulse.intensity * 4 : 1.4;
+  });
+  if (!pulse) {
+    outputPulseMesh.visible = false;
+    return;
+  }
+  const target = outputCells.find(({ x }) => x === pulse.x).cell;
+  outputPulseMesh.visible = true;
+  outputPulseMesh.position.copy(target.position);
+  outputPulseMesh.position.z += 0.18;
+  const scale = 0.7 + pulse.intensity * 1.1 + 0.12 * Math.sin(time * 0.02);
+  outputPulseMesh.scale.setScalar(scale);
+  outputPulseMesh.material.opacity = 0.25 + pulse.intensity * 0.65;
 }
 
 function updateSignalFlow(time) {
@@ -443,6 +471,7 @@ function animate(time) {
     lastStep = time;
   }
   updateSensoryActivation(time);
+  updateOutputActivation(time);
   updateSignalFlow(time);
   controls.update();
   renderer.render(scene, camera);
