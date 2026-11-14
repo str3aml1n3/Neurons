@@ -41,6 +41,11 @@ function checkInvariants(brain) {
     assert.ok(!(s.from.kind === 'input' && s.to.kind === 'output'), 'digit never wires straight to output');
     assert.notEqual(s.from.kind, 'output', 'outputs only receive');
     assert.notEqual(s.to.kind, 'input', 'inputs only send');
+    assert.equal(s.inhibitory, Boolean(s.from.inhibitory), 'a neuron is inhibitory for all its outputs (Dale)');
+    if (s.inhibitory) {
+      assert.equal(s.dendrite, null, 'inhibitory synapses target bodies, not dendrites');
+      assert.equal(manhattan(s.cell, s.to.soma), 0, 'an inhibitory synapse sits on its target body');
+    }
     brain.path(s).forEach((cell, i, all) => {
       if (i > 0) assert.equal(manhattan(all[i - 1], cell), 1, 'spike path is continuous');
     });

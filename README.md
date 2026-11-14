@@ -19,7 +19,9 @@ learns to tell **small** digits (0–4) from **big** ones (5–9).
   OFF cells, each with its own cells on the front face. An unlit segment sends
   a signal too.
 - A neuron fires when enough signals arrive
-  close together, and its signal travels on toward the output strip. There,
+  close together, and its signal travels on toward the output strip. A quarter
+  of the neurons are **inhibitory**: they connect to other neurons' bodies and
+  pull their charge down, so the network can learn "this, but not that". There,
   blue cells vote *small* and red cells vote *big*.
 - A correct answer releases **dopamine**, which strengthens the synapses that
   produced it. A wrong answer weakens them. Synapses compete for limited
@@ -27,7 +29,7 @@ learns to tell **small** digits (0–4) from **big** ones (5–9).
   they pull back partway and regrow nearby, avoiding the old partner.
 
 The full rules, parameters and the meaning of every color are in
-**[docs/neurons.md](docs/neurons.md)**. It currently reaches about 67% accuracy
+**[docs/neurons.md](docs/neurons.md)**. It currently reaches about 72% accuracy
 (chance is 50%).
 
 Drag with a mouse or finger to rotate the cube, and pinch or scroll to zoom.

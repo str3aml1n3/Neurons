@@ -12,6 +12,7 @@ const COLORS = {
   spike: 0xfff6c2,
   spikeGlow: 0xffc23a,
   dark: 0xb28cff, // dark-channel signals, on their first hop
+  inhibitory: 0xff4fd8, // inhibitory neurons, their axons, synapses and signals
   darkCell: 0x2a2140,
   small: 0x3f7dff,
   big: 0xff4d5e,
@@ -217,6 +218,11 @@ halos.frustumCulled = false;
 cube.add(halos);
 const HALO_SIZE = 1 / Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2); // world units -> point size
 
+// Inhibitory synapses sit on the target's body and are drawn as flat bars,
+// the "⊣" symbol neuroscience diagrams use for inhibition.
+const inhibitoryBarMesh = instanced(new THREE.CylinderGeometry(0.24, 0.24, 0.07, 18), new THREE.MeshLambertMaterial({
+  emissive: COLORS.inhibitory, emissiveIntensity: 0.35,
+}), 200);
 const synapseMesh = instanced(new THREE.BoxGeometry(0.36, 0.36, 0.36), new THREE.MeshLambertMaterial({
   emissive: COLORS.synapse, emissiveIntensity: 0.25,
 }), 400);
@@ -240,8 +246,14 @@ const pointMaterial = (size) => new THREE.PointsMaterial({
 });
 const spikeGlow = new THREE.Points(glowGeometry, pointMaterial(1.3));
 const spikeCore = new THREE.Points(coreGeometry, pointMaterial(0.5));
-const glowTint = { lit: new THREE.Color(COLORS.spikeGlow), dark: new THREE.Color(COLORS.dark) };
-const coreTint = { lit: new THREE.Color(COLORS.spike), dark: new THREE.Color(COLORS.dark).lerp(white, 0.5) };
+const glowTint = {
+  lit: new THREE.Color(COLORS.spikeGlow), dark: new THREE.Color(COLORS.dark), inhibitory: new THREE.Color(COLORS.inhibitory),
+};
+const coreTint = {
+  lit: new THREE.Color(COLORS.spike),
+  dark: new THREE.Color(COLORS.dark).lerp(white, 0.5),
+  inhibitory: new THREE.Color(COLORS.inhibitory).lerp(white, 0.5),
+};
 spikeGlow.renderOrder = 10;
 spikeCore.renderOrder = 11;
 spikeGlow.frustumCulled = false;
@@ -318,13 +330,16 @@ const direction = new THREE.Vector3();
 const middle = new THREE.Vector3();
 const segmentScale = new THREE.Vector3();
 const segmentRotation = new THREE.Quaternion();
+const connectorColor = (connector) => (connector.type === 'axon' && connector.owner.inhibitory
+  ? COLORS.inhibitory : COLORS[connector.type]);
+
 function updateConnectors() {
   let segments = 0;
   let joints = 0;
   brain.connectors.forEach((connector) => {
     if (!connector.cells.length) return;
     const base = connectorRadius(connector);
-    tint.setHex(COLORS[connector.type]).multiplyScalar(STATE_BRIGHTNESS[connector.state]);
+    tint.setHex(connectorColor(connector)).multiplyScalar(STATE_BRIGHTNESS[connector.state]);
     const points = connectorCurve(connector);
     const last = points.length - 1;
     for (let j = 1; j <= last && segments < MAX_SEGMENTS; j += 1) {
@@ -339,7 +354,7 @@ function updateConnectors() {
       segmentMesh.setColorAt(segments, tint);
       segments += 1;
       // A joint rounds each bend; a connected axon ends in a bouton.
-      const bouton = j === last && connector.type === 'axon' && connector.synapse;
+      const bouton = j === last && connector.type === 'axon' && connector.synapse && !connector.synapse.inhibitory;
       place(jointMesh, joints, b, bouton ? base * 2.6 : taper(connector, base, j / last, j / SUBSTEPS));
       jointMesh.setColorAt(joints, tint);
       joints += 1;
@@ -352,7 +367,7 @@ function updateConnectors() {
 function updateOccupancy() {
   let count = 0;
   brain.connectors.forEach((connector) => {
-    tint.setHex(COLORS[connector.type]);
+    tint.setHex(connectorColor(connector));
     connector.cells.forEach((cell) => {
       place(occupancy, count, cellToVector(cell), 1);
       occupancy.setColorAt(count, tint);
@@ -410,7 +425,9 @@ function updateSpikes(frac) {
     const head = spike.index + frac;
     // Dark-channel signals are violet until they reach the first neuron;
     // whatever a neuron fires is its own (gold) signal.
-    const kind = spike.synapse.from.channel === 'dark' ? 'dark' : 'lit';
+    // A neuron's own signals are gold, or magenta if it is inhibitory.
+    const { from } = spike.synapse;
+    const kind = from.inhibitory ? 'inhibitory' : from.channel === 'dark' ? 'dark' : 'lit';
     const g = glowTint[kind];
     const route = spikeRoute(spike.synapse);
     for (let k = 0; k < TRAIL.length; k += 1) {
@@ -440,11 +457,17 @@ function updateSpikes(frac) {
 }
 
 const haloRest = new THREE.Color(COLORS.dendrite);
+const haloInhibitory = new THREE.Color(COLORS.inhibitory);
+const somaInhibitory = new THREE.Color(1, 0.6, 0.92);
 const haloFire = new THREE.Color(COLORS.spikeGlow);
 const gold = new THREE.Color(COLORS.gold);
 const dimGold = new THREE.Color(0x8a7440); // muted lit-channel gold
 const darkFaint = new THREE.Color(0x5e4c8c); // muted dark-channel violet
 const lime = new THREE.Color(COLORS.synapse);
+const barDirection = new THREE.Vector3();
+const barSpot = new THREE.Vector3();
+const barScale = new THREE.Vector3();
+const barRotation = new THREE.Quaternion();
 
 // Per-frame glow effects: firing, charge, input and output activity, dopamine.
 function updateGlow(time) {
@@ -453,9 +476,11 @@ function updateGlow(time) {
   brain.neurons.forEach((neuron, i) => {
     const charge = Math.max(0, Math.min(1, neuron.potential / neuron.threshold));
     const flash = Math.max(0, 1 - since(neuron) / 4);
-    somaMesh.setColorAt(i, tint.setScalar(0.85 + charge * 0.3 + flash * 0.6));
+    const glowLevel = 0.85 + charge * 0.3 + flash * 0.6;
+    somaMesh.setColorAt(i, neuron.inhibitory ? tint.copy(somaInhibitory).multiplyScalar(glowLevel) : tint.setScalar(glowLevel));
     haloSizes[i] = (1.1 + charge * 0.5 + flash * 1.4) * HALO_SIZE;
-    tint.copy(flash > 0 ? haloFire : haloRest).multiplyScalar(0.35 + charge * 0.4 + flash * 0.6);
+    const rest = neuron.inhibitory ? haloInhibitory : haloRest;
+    tint.copy(flash > 0 && !neuron.inhibitory ? haloFire : rest).multiplyScalar(0.35 + charge * 0.4 + flash * 0.6);
     tint.toArray(haloColors, i * 3);
   });
   somaMesh.instanceColor.needsUpdate = true;
@@ -503,18 +528,37 @@ function updateGlow(time) {
   // Size shows weight; brightness shows trophic support, which fades before a
   // prune. Synapses credited for a rewarded answer flash on dopamine.
   const rewardGlow = brain.dopamine > 0.05;
-  const count = Math.min(brain.synapses.length, 400);
-  for (let i = 0; i < count; i += 1) {
-    const synapse = brain.synapses[i];
+  let cubes = 0;
+  let bars = 0;
+  brain.synapses.forEach((synapse) => {
     const strength = synapse.weight / brain.p.maxWeight;
     const credited = rewardGlow && brain.lastEligible?.has(synapse);
     const support = Math.min(1, synapse.trophic);
-    place(synapseMesh, i, cellToVector(synapse.cell), 0.6 + strength * 0.9 + (credited ? brain.dopamine * 0.8 : 0));
+    const boost = credited ? brain.dopamine * 0.8 : 0;
+    if (synapse.inhibitory) {
+      if (bars >= 200) return;
+      // A bar on the body's surface, facing the incoming axon.
+      const route = connectorCurve(synapse.axon);
+      const body = route.at(-1);
+      barDirection.subVectors(route.at(-2) ?? body, body).normalize();
+      barScale.set(0.7 + strength * 0.6 + boost, 1, 0.7 + strength * 0.6 + boost);
+      place(inhibitoryBarMesh, bars, barSpot.copy(body).addScaledVector(barDirection, 0.42), barScale,
+        barRotation.setFromUnitVectors(up, barDirection));
+      tint.setHex(COLORS.inhibitory).multiplyScalar(0.35 + support * 0.8);
+      if (credited) tint.lerp(white, brain.dopamine * 0.8);
+      inhibitoryBarMesh.setColorAt(bars, tint);
+      bars += 1;
+      return;
+    }
+    if (cubes >= 400) return;
+    place(synapseMesh, cubes, cellToVector(synapse.cell), 0.6 + strength * 0.9 + boost);
     tint.copy(lime).multiplyScalar(0.35 + support * 0.8);
     if (credited) tint.lerp(white, brain.dopamine * 0.8);
-    synapseMesh.setColorAt(i, tint);
-  }
-  finish(synapseMesh, count);
+    synapseMesh.setColorAt(cubes, tint);
+    cubes += 1;
+  });
+  finish(synapseMesh, cubes);
+  finish(inhibitoryBarMesh, bars);
 
   frameMaterial.color.setHex(COLORS.frame).lerp(tint.setHex(COLORS.gold), brain.dopamine);
   frameMaterial.opacity = 0.85 + 0.15 * Math.sin(time * 0.01) * brain.dopamine;

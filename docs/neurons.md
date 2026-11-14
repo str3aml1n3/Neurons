@@ -21,7 +21,7 @@ Three kinds of node send and receive signals.
 
 | Node | Where | Grows | Role |
 | --- | --- | --- | --- |
-| **Neuron** | 16 random cells inside the cube, at least 2 cells apart | 1–3 dendrites and 1–3 axons | Adds up incoming signals and fires |
+| **Neuron** | 16 random cells inside the cube, at least 2 cells apart | 1–3 dendrites and 1–3 axons | Adds up incoming signals and fires. 12 are excitatory and 4 are **inhibitory** (see [Inhibition](#inhibition)). |
 | **Digit channel** (input) | The front face. Each of the 7 segments has a **lit** and a **dark** channel with their own cells, so there are 14. | 1 axon, from a random cell of the channel | The lit channel sends signals while its segment is lit, the dark channel while it is unlit |
 | **Output cell** | 8 cells of the strip on the back face | 1 dendrite | Collects votes: left half *small*, right half *big* (the middle cell is neutral) |
 
@@ -103,6 +103,13 @@ Signals always pass through at least one neuron. A digit's axon cannot connect
 to an output's dendrite, nothing connects a node to itself, and a connector
 won't connect to a partner it is avoiding.
 
+**Inhibitory neurons connect differently.** Their axons always aim at another
+neuron's body, and connect only when the tip reaches a **neuron's body cell**
+(or an output cell). They never connect to dendrites. A body can take several
+inhibitory synapses, so inhibition doesn't use up any dendrite. In real
+cortex, too, most synapses on the cell body are inhibitory. Every synapse an
+inhibitory neuron makes is inhibitory (Dale's principle).
+
 Every synapse has:
 
 - a **weight** (strength), starting at 1.0 and kept between 0.05 and 2.0, and
@@ -133,6 +140,28 @@ A neuron with a strong synapse (weight ≥ threshold) fires from one signal. Wit
 weaker synapses it needs several signals arriving close together, so it can
 respond to a *combination* of lit segments.
 
+## Inhibition
+
+A quarter of the neurons (4 of 16) are inhibitory. They receive and fire by the
+same rules as the rest, but their signals pull charge **down**, modeled on
+real chloride (GABA) inhibition:
+
+- **Pull toward a floor.** An inhibitory signal moves the target's charge part
+  of the way toward a floor of −0.2, just below rest: 50% of the way per unit
+  of weight, capped at all the way. The more charged the target is, the harder
+  it is pulled down. Inhibition matters most on a neuron about to fire, and
+  never drives charge below the floor.
+- **Shunting.** For a few ticks afterward, part of any excitation the target
+  receives leaks away: excitation is scaled by (1 − shunt), and the shunt
+  fades to 60% each tick. Inhibition that arrives just before excitation
+  vetoes it.
+- **On the output strip**, an inhibitory signal subtracts its weight from that
+  side's vote, down to zero.
+
+This gives the network "but not" logic. A neuron that votes *small* when the
+top-left segment is dark (1, 2, 3, 7) is wrong on 7. An inhibitory neuron
+driven by "bottom dark" (1, 4, 7) that reaches it can veto it on 7.
+
 ## Answering
 
 - A signal that reaches an output cell adds the synapse's weight to that
@@ -162,6 +191,22 @@ Then:
   the same digit is shown again.
 
 Synapses that didn't contribute to the answer are not changed.
+
+**Inhibitory synapses** are judged by whom they suppressed. A vetoed neuron
+didn't fire, so it isn't in the responsible chain. Instead, each neuron
+**leans** toward the side its excitatory connections lead to: small, big, or
+neither. Every inhibitory synapse that delivered a signal this trial is:
+
+- **helpful** if its target leans toward the wrong side (or is a wrong-side
+  output cell): it and the chain that fired its neuron are strengthened by
+  +0.2 and share trophic support;
+- **harmful** if its target leans toward the correct side: it and the chain
+  that fired its neuron are weakened by −0.2.
+
+Because the chain that *fired* the inhibitory neuron is credited too, an
+inhibitory neuron learns which digits to fire for, not just whom to inhibit.
+Without that (an earlier version), inhibition stayed unselective and lowered
+accuracy.
 
 ## Pruning and regrowth
 
@@ -195,7 +240,7 @@ that gave up while growing starts over from its body with a new guided goal.
 
 The headless test (`node tests/brain.test.mjs`) runs 5 random networks for
 30,000 ticks each. Over each run's last 300 answers, accuracy averages about
-**67%** (chance is 50%). It learns, but only modestly.
+**72%** (chance is 50%). It learns, but only modestly.
 
 Over 10 networks and 40,000 ticks, the regrowth rules (partial retraction,
 avoiding pruned partners, local and clustered regrowth, trophic competition)
@@ -203,20 +248,23 @@ cut prunes by about 40% and rebuilt same-partner connections by about 70%. They
 improved accuracy only slightly, from about 58% to about 62%, which is close to
 the run-to-run noise. Adding dark channels then raised it to about 64% and cut
 prunes by another quarter. Giving the two channels separate cells, with the
-bigger face layout, raised it to about 69%.
+bigger face layout, raised it to about 69%. Inhibitory neurons then added
+about 2.5 points: 69.2% → 71.9% on one set of 10 networks, and 67.3% → 69.8%
+on a second, independent set.
 
 **Per digit**, late in training (10 networks):
 
 | Digit | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Correct | 48% | 87% | 79% | 60% | 74% | 91% | 94% | 50% | 73% | 70% |
+| Correct | 63% | 95% | 82% | 52% | 84% | 97% | 94% | 45% | 69% | 82% |
 
 Digits that one dark segment identifies are learned well. The top segment is
 dark only for 1 and 4 (small), top-right only for 5 and 6 (big), and
 bottom-right only for 2 (small). Digits that need a *combination* of segments
-(0, 3, 7) stay near chance. Learning those needs neurons that reliably
-respond to two conditions together, which excitatory-only neurons with this
-simple credit assignment rarely develop.
+are harder. Inhibition helped 0 (48% → 63%) and 9 (70% → 82%), but 3 and 7
+remain near chance. Learning those needs neurons that reliably respond to
+specific combinations, which this small network with simple credit assignment
+rarely develops.
 
 ## What you see
 
@@ -229,6 +277,8 @@ simple credit assignment rarely develop.
 | Smooth curves | Connectors are drawn as curves that cut the grid's corners, so paths look shorter than their cell routes. The simulation still grows them cell by cell: the faint tinted cubes show the cells they really occupy, and signals follow the drawn curves. |
 | Faint tinted cube | A cell occupied by a connector |
 | Lime cube | Synapse. Size shows weight; glow shows trophic support and fades before a prune. Responsible synapses flash on dopamine. |
+| Magenta body, axon and signal | An inhibitory neuron, its axons and its signals |
+| Magenta bar on a body | Inhibitory synapse (the "⊣" symbol), facing the incoming axon. Size shows weight; glow shows trophic support. |
 | Gold glowing dot with a trail | A signal traveling one cell per tick |
 | Violet glowing dot | A dark-channel signal, on its way to the first neuron. What a neuron fires is always gold. |
 | Gold cells (front, outer) | Lit-channel cells; bright while their segment is lit, faint gold otherwise |
@@ -262,6 +312,10 @@ All values live in `PARAMS` in [`web/brain.js`](../web/brain.js).
 | `trophicShare` | 1 | Support a receiver shares among its responsible inputs per reward |
 | `trophicMax` | 3 | Support limit |
 | `trophicFloor` | 0.1 | Support below which a synapse is pruned |
+| `inhibitoryShare` | 0.25 | Share of neurons that are inhibitory |
+| `inhibitionFloor` | −0.2 | Charge an inhibitory signal pulls toward |
+| `inhibitionStrength` | 0.5 | Share of the way to the floor per unit of weight |
+| `shuntDecay` | 0.6 | Share of shunting kept each tick |
 | `threshold` | 1 | Starting firing threshold |
 | `minThreshold` / `maxThreshold` | 0.5 / 2.5 | Threshold limits |
 | `thresholdRecovery` | 0.004 | Threshold drop per tick |

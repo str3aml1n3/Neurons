@@ -6,7 +6,9 @@
 // Nodes grow connectors one whole cell at a time: dendrites carry signals in,
 // axons carry them out. A synapse forms where a growing tip enters a cell held
 // by the opposite kind of connector. Nodes are:
-//   - neurons: random cells inside the cube, 1..3 dendrites and 1..3 axons
+//   - neurons: random cells inside the cube, 1..3 dendrites and 1..3 axons.
+//     A quarter are inhibitory: their axons connect to other neurons' bodies
+//     (or the output strip) and pull charge down instead of adding it.
 //   - inputs: each digit segment on the front face has a lit channel and a
 //     dark channel (like the eye's ON and OFF cells), 1 axon each. A lit
 //     segment fires its lit channel; an unlit segment fires its dark channel.
@@ -33,6 +35,10 @@ export const PARAMS = {
   maxWeight: 2,
   minWeight: 0.05,
   pruneBelow: 0.3, // synapses weaker than this are removed and regrow
+  inhibitoryShare: 0.25, // share of neurons that are inhibitory
+  inhibitionFloor: -0.2, // charge an inhibitory signal pulls toward
+  inhibitionStrength: 0.5, // share of the way to the floor per unit weight
+  shuntDecay: 0.6, // shunting kept per tick; excitation is scaled by (1 - shunt)
   threshold: 1, // starting firing threshold; adapts per neuron
   minThreshold: 0.5,
   maxThreshold: 2.5,
@@ -140,6 +146,7 @@ export class Brain {
   addNode(fields) {
     const node = {
       id: this.nodes.length, potential: 0, refractory: 0, lastFired: -Infinity, threshold: this.p.threshold,
+      shunt: 0, inhibitory: false,
       axons: [], dendrites: [], cells: [fields.soma], ...fields,
     };
     node.cells.forEach((cell) => this.cells.set(keyOf(cell), { kind: 'node', node }));
@@ -174,7 +181,9 @@ export class Brain {
           Math.abs(n.soma.x - soma.x), Math.abs(n.soma.y - soma.y), Math.abs(n.soma.z - soma.z),
         ) < 2);
         if (crowded || this.cells.has(keyOf(soma))) continue;
-        const neuron = this.addNode({ kind: 'neuron', soma });
+        // Placement is random, so making the first ones inhibitory is too.
+        const inhibitory = i < Math.round(this.p.neurons * this.p.inhibitoryShare);
+        const neuron = this.addNode({ kind: 'neuron', soma, inhibitory });
         this.neurons.push(neuron);
         break;
       }
@@ -212,7 +221,10 @@ export class Brain {
       return;
     }
     const others = this.neurons.filter((n) => n !== connector.owner && !this.avoids(connector, n));
-    const towardNeuron = connector.owner.kind !== 'neuron' || (others.length && this.random() < 0.5);
+    // Inhibitory axons always head for another neuron's body.
+    const inhibitoryAxon = connector.type === 'axon' && connector.owner.inhibitory;
+    const towardNeuron = connector.owner.kind !== 'neuron' || inhibitoryAxon
+      || (others.length && this.random() < 0.5);
     if (towardNeuron && others.length) connector.goal = this.pick(others).soma;
     else connector.goal = connector.type === 'axon' ? this.pick(OUTPUT_CELLS) : this.pick(SEGMENT_CELLS);
   }
@@ -311,8 +323,20 @@ export class Brain {
       && !(from.kind === 'input' && to.kind === 'output');
   }
 
+  // An inhibitory axon connects only where its tip reaches another neuron's
+  // body (or an output cell). A body can take several inhibitory synapses.
+  tryInhibit(connector, cell, content) {
+    if (content.kind !== 'node' || content.node.kind === 'input') return false;
+    const { node } = content;
+    if (!this.canLink(connector.owner, node) || this.avoids(connector, node)) return false;
+    connector.cells.push(cell);
+    this.addSynapse({ from: connector.owner, to: node, cell, axon: connector, dendrite: null, inhibitory: true });
+    return true;
+  }
+
   tryConnect(connector, cell, content) {
     const isAxon = connector.type === 'axon';
+    if (isAxon && connector.owner.inhibitory) return this.tryInhibit(connector, cell, content);
     // A tip reaching a digit or output cell directly.
     if (content.kind === 'node' && content.node.kind !== 'neuron') {
       const { node } = content;
@@ -330,6 +354,7 @@ export class Brain {
     if (content.kind !== 'connector' || other.type === connector.type || other.state !== 'growing') return false;
     const axon = isAxon ? connector : other;
     const dendrite = isAxon ? other : connector;
+    if (axon.owner.inhibitory) return false; // inhibitory axons target bodies, not dendrites
     if (!this.canLink(axon.owner, dendrite.owner)) return false;
     if (this.avoids(axon, dendrite.owner) || this.avoids(dendrite, axon.owner)) return false;
     // Cut the other connector back to the shared cell; that cell becomes the synapse.
@@ -343,7 +368,7 @@ export class Brain {
   addSynapse(fields) {
     const synapse = {
       weight: this.p.initialWeight, trophic: this.p.trophicStart, delivered: false, lastArrival: -Infinity,
-      ...fields,
+      inhibitory: false, active: false, ...fields,
     };
     [synapse.axon, synapse.dendrite].forEach((c) => {
       if (!c) return;
@@ -417,8 +442,8 @@ export class Brain {
     this.trialTick = 0;
     this.votes = { small: 0, big: 0 };
     this.spikes = [];
-    this.nodes.forEach((n) => { n.potential = 0; n.refractory = 0; n.contrib = new Set(); });
-    this.synapses.forEach((s) => { s.delivered = false; });
+    this.nodes.forEach((n) => { n.potential = 0; n.refractory = 0; n.shunt = 0; n.contrib = new Set(); });
+    this.synapses.forEach((s) => { s.delivered = false; s.active = false; });
   }
 
   step() {
@@ -454,6 +479,7 @@ export class Brain {
     }
     this.neurons.forEach((n) => {
       n.potential = n.potential * this.p.leak + this.random() * this.p.noise;
+      n.shunt *= this.p.shuntDecay;
       n.refractory -= 1;
       n.threshold = Math.max(this.p.minThreshold, n.threshold - this.p.thresholdRecovery);
     });
@@ -467,17 +493,37 @@ export class Brain {
       spike.index += 1;
       if (spike.index < spike.path.length - 1) return true;
       const { synapse } = spike;
-      if (synapse.to.kind === 'output') {
+      if (synapse.inhibitory) {
+        this.inhibit(synapse);
+      } else if (synapse.to.kind === 'output') {
         this.votes[synapse.to.small ? 'small' : 'big'] += synapse.weight;
         synapse.delivered = true;
         synapse.to.lastFired = this.tick;
         this.outputPulse = { x: synapse.to.x, intensity: 1 };
       } else {
-        synapse.to.potential += synapse.weight;
+        // Recent inhibition shunts excitation: part of it leaks away.
+        synapse.to.potential += synapse.weight * (1 - synapse.to.shunt);
         synapse.lastArrival = this.tick;
       }
       return false;
     });
+  }
+
+  // Like real (chloride) inhibition: charge is pulled toward a floor just
+  // below rest, harder the more charged the neuron is, and incoming
+  // excitation is shunted for a few ticks. On the output strip, inhibition
+  // takes votes away from that side.
+  inhibit(synapse) {
+    synapse.active = true;
+    const target = synapse.to;
+    if (target.kind === 'output') {
+      const side = target.small ? 'small' : 'big';
+      this.votes[side] = Math.max(0, this.votes[side] - synapse.weight);
+      return;
+    }
+    const pull = Math.min(1, synapse.weight * this.p.inhibitionStrength);
+    target.potential -= pull * (target.potential - this.p.inhibitionFloor);
+    target.shunt = Math.min(1, target.shunt + pull);
   }
 
   fireNeurons() {
@@ -488,7 +534,9 @@ export class Brain {
       neuron.refractory = this.p.refractory;
       neuron.lastFired = this.tick;
       this.synapses.forEach((s) => {
-        if (s.to === neuron && this.tick - s.lastArrival <= this.p.coincidence) neuron.contrib.add(s);
+        if (s.to === neuron && !s.inhibitory && this.tick - s.lastArrival <= this.p.coincidence) {
+          neuron.contrib.add(s);
+        }
         if (s.from === neuron) this.emit(s);
       });
     });
@@ -507,18 +555,78 @@ export class Brain {
     }
   }
 
-  // Synapses behind the answer: output synapses that voted for the chosen
-  // side, plus every synapse that helped fire a neuron feeding them, traced
-  // back to the digit.
-  eligible(side) {
+  // The given synapses plus every synapse that helped fire the neurons
+  // sending them, traced back to the digit.
+  chain(start) {
     const found = new Set();
     const visit = (s) => {
       if (found.has(s)) return;
       found.add(s);
       s.from.contrib?.forEach(visit);
     };
-    this.synapses.filter((s) => s.delivered && s.to.small === (side === 'small')).forEach(visit);
+    start.forEach(visit);
     return found;
+  }
+
+  // Synapses behind the answer: excitatory output synapses that voted for the
+  // chosen side, and the chain that fired them.
+  eligible(side) {
+    return this.chain(this.synapses.filter((s) => s.delivered && !s.inhibitory
+      && s.to.small === (side === 'small')));
+  }
+
+  // Which side each neuron's excitatory connections lead to: 'small', 'big'
+  // or null if neither (or both equally).
+  leanings() {
+    const next = new Map();
+    this.synapses.forEach((s) => {
+      if (s.inhibitory) return;
+      if (!next.has(s.from)) next.set(s.from, []);
+      next.get(s.from).push(s.to);
+    });
+    const lean = new Map();
+    this.neurons.forEach((neuron) => {
+      const seen = new Set([neuron]);
+      const queue = [neuron];
+      let small = 0;
+      let big = 0;
+      while (queue.length) {
+        (next.get(queue.pop()) ?? []).forEach((to) => {
+          if (seen.has(to)) return;
+          seen.add(to);
+          if (to.kind === 'output') {
+            if (to.small) small += 1;
+            else big += 1;
+          } else queue.push(to);
+        });
+      }
+      lean.set(neuron, small > big ? 'small' : big > small ? 'big' : null);
+    });
+    return lean;
+  }
+
+  // Inhibition is judged by whom it suppressed this trial: suppressing a
+  // neuron (or output cell) that leans toward the wrong side is helpful,
+  // toward the right side harmful. Returns both sets.
+  judgeInhibition() {
+    const correctSide = this.digit < 5 ? 'small' : 'big';
+    const lean = this.leanings();
+    const helpful = [];
+    const harmful = [];
+    this.synapses.forEach((s) => {
+      if (!s.inhibitory || !s.active) return;
+      const side = s.to.kind === 'output' ? (s.to.small ? 'small' : 'big') : lean.get(s.to);
+      if (side) (side === correctSide ? harmful : helpful).push(s);
+    });
+    return { helpful, harmful };
+  }
+
+  shareTrophic(synapses) {
+    const perTarget = new Map();
+    synapses.forEach((s) => perTarget.set(s.to, (perTarget.get(s.to) ?? 0) + 1));
+    synapses.forEach((s) => {
+      s.trophic = Math.min(this.p.trophicMax, s.trophic + this.p.trophicShare / perTarget.get(s.to));
+    });
   }
 
   learn(side) {
@@ -526,18 +634,24 @@ export class Brain {
     this.answer = side;
     this.attempts += 1;
     this.history.push(correct);
-    this.lastEligible = this.eligible(side);
-    this.lastEligible.forEach((s) => {
-      const change = correct ? this.p.reward : -this.p.punish;
-      s.weight = Math.max(this.p.minWeight, Math.min(this.p.maxWeight, s.weight + change));
-    });
-    if (correct) {
-      const inputsPerNode = new Map();
-      this.lastEligible.forEach((s) => inputsPerNode.set(s.to, (inputsPerNode.get(s.to) ?? 0) + 1));
-      this.lastEligible.forEach((s) => {
-        s.trophic = Math.min(this.p.trophicMax, s.trophic + this.p.trophicShare / inputsPerNode.get(s.to));
-      });
-    }
+    const change = (synapse, amount) => {
+      synapse.weight = Math.max(this.p.minWeight, Math.min(this.p.maxWeight, synapse.weight + amount));
+    };
+    // Excitation: the chain behind the answer is strengthened if it was
+    // right and weakened if it was wrong.
+    const behindAnswer = this.eligible(side);
+    behindAnswer.forEach((s) => change(s, correct ? this.p.reward : -this.p.punish));
+    if (correct) this.shareTrophic([...behindAnswer]);
+    // Inhibition: helpful inhibitory synapses, and the chain that fired their
+    // neurons, are strengthened; harmful ones and their chain are weakened.
+    // So an inhibitory neuron learns which digits to fire for, not just whom
+    // to inhibit.
+    const { helpful, harmful } = this.judgeInhibition();
+    const helpfulChain = this.chain(helpful);
+    helpfulChain.forEach((s) => change(s, this.p.reward));
+    this.shareTrophic([...helpfulChain]);
+    this.chain(harmful).forEach((s) => change(s, -this.p.punish));
+    this.lastEligible = new Set([...behindAnswer, ...helpfulChain]);
     this.synapses.filter((s) => s.weight < this.p.pruneBelow).forEach((s) => this.removeSynapse(s));
     if (correct) {
       this.rewards += 1;
