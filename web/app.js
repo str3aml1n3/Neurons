@@ -76,7 +76,7 @@ for (let a = 0; a <= SIZE; a += 1) {
 const gridGeometry = new THREE.BufferGeometry();
 gridGeometry.setAttribute('position', new THREE.Float32BufferAttribute(gridPositions, 3));
 cube.add(new THREE.LineSegments(gridGeometry, new THREE.LineBasicMaterial({
-  color: 0x4f86a8, transparent: true, opacity: 0.05, depthWrite: false,
+  color: 0x5b93b8, transparent: true, opacity: 0.1, depthWrite: false,
 })));
 
 // Grid x is mirrored so the digit reads left-to-right from the default front view.
@@ -136,7 +136,7 @@ function finish(mesh, count) {
 // Input and output cells are whole cubes inside the grid's front and back
 // layers. Digit cells are split by how visible they should be right now.
 // Rounded cells: each still fills one grid cell, but reads as a soft sensor, not a block.
-const ioGeometry = new RoundedBoxGeometry(0.78, 0.78, 0.78, 3, 0.16);
+const ioGeometry = new RoundedBoxGeometry(0.78, 0.78, 0.78, 2, 0.06);
 const digitCells = SEGMENT_CELLS.map((cell) => ({ cell, position: cellToVector(cell) }));
 const digitLit = instanced(ioGeometry, new THREE.MeshLambertMaterial({
   emissive: 0xa96400, emissiveIntensity: 0.6, transparent: true, opacity: 0.92,
@@ -520,6 +520,8 @@ const axonColor = new THREE.Color(COLORS.axon);
 const dendriteColor = new THREE.Color(COLORS.dendrite);
 const toNeighbour = new THREE.Vector3();
 const partSpot = new THREE.Vector3();
+const partScale = new THREE.Vector3();
+const partRotation = new THREE.Quaternion();
 const barDirection = new THREE.Vector3();
 const barSpot = new THREE.Vector3();
 const barScale = new THREE.Vector3();
@@ -607,24 +609,27 @@ function updateGlow(time) {
       bars += 1;
       return;
     }
-    // Each part sits just off the synapse cell, toward its own connector.
-    const radius = 0.1 + strength * 0.09 + boost * 0.1;
+    // The two parts overlap into one rounded junction, each pulled slightly
+    // toward its own connector and stretched along it (a bouton is egg-shaped).
+    const radius = 0.11 + strength * 0.09 + boost * 0.1;
     const brightness = 0.9 + support * 0.7; // above 1 brightens the part's own colour
-    const addPart = (mesh, index, connector, color, size) => {
+    const addPart = (mesh, index, connector, color, size, stretch) => {
       const route = connectorCurve(connector);
       const point = route.at(-1);
       toNeighbour.subVectors(route.at(-2) ?? point, point).normalize();
-      place(mesh, index, partSpot.copy(point).addScaledVector(toNeighbour, size * 0.85), size);
+      partScale.set(size, size * stretch, size);
+      place(mesh, index, partSpot.copy(point).addScaledVector(toNeighbour, size * 0.4), partScale,
+        partRotation.setFromUnitVectors(up, toNeighbour));
       tint.copy(color).multiplyScalar(brightness);
       if (credited) tint.lerp(white, brain.dopamine * 0.8);
       mesh.setColorAt(index, tint);
     };
     if (synapse.axon && boutons < 400) {
-      addPart(boutonMesh, boutons, synapse.axon, axonColor, radius * 1.15);
+      addPart(boutonMesh, boutons, synapse.axon, axonColor, radius * 1.1, 1.35);
       boutons += 1;
     }
     if (synapse.dendrite && spines < 400) {
-      addPart(spineMesh, spines, synapse.dendrite, dendriteColor, radius);
+      addPart(spineMesh, spines, synapse.dendrite, dendriteColor, radius, 1.1);
       spines += 1;
     }
   });

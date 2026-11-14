@@ -568,14 +568,14 @@ output cell) and \`inputAxons\` (axons per digit channel), both 1 by default.
 | Tube thickness | Synapse weight, once connected |
 | Smooth curves | Connectors are drawn as curves that cut the grid's corners, so paths look shorter than their cell routes. The simulation still grows them cell by cell: the faint tinted cubes show the cells they really occupy, and signals follow the drawn curves. |
 | Faint tinted cube | A cell occupied by a connector |
-| Amber knob against a teal knob | Synapse: the axon's bouton pressed against a spine head on the dendrite (a connection to a digit or output cell shows only one of the two). Size shows weight; brightness shows trophic support and fades before a prune. Responsible synapses flash on dopamine. |
+| Amber and teal knobs merged into one rounded junction | Synapse: the axon's egg-shaped bouton pressed against a spine head on the dendrite (a connection to a digit or output cell shows only one of the two). Size shows weight; brightness shows trophic support and fades before a prune. Responsible synapses flash on dopamine. |
 | Rose body, axon and signal | An inhibitory neuron, its axons and its signals |
 | Rose bar on a body | Inhibitory synapse (the "⊣" symbol), facing the incoming axon. Size shows weight; brightness shows trophic support. |
 | Warm white glowing dot with a trail | A signal traveling one cell per tick |
 | Lavender glowing dot | A dark-channel signal, on its way to the first neuron. What a neuron fires is always warm white (rose if inhibitory). |
-| Gold rounded cells (front, outer) | Lit-channel cells; bright while their segment is lit, faint gold otherwise |
-| Lavender rounded cells (front, inner) | Dark-channel cells; glow while their segment is unlit and flash when they fire, faint otherwise |
-| Blue and red rounded cells (back) | Output strip: blue = small, red = big |
+| Gold cells with softened corners (front, outer) | Lit-channel cells; bright while their segment is lit, faint gold otherwise |
+| Lavender cells (front, inner) | Dark-channel cells; glow while their segment is unlit and flash when they fire, faint otherwise |
+| Blue and red cells (back) | Output strip: blue = small, red = big |
 | Gold cube outline | Dopamine is being released |
 | Gold ring, expanding | A synapse was **strengthened** by the latest answer (and, on a correct answer, gained trophic support) |
 | Blue ring, contracting | A synapse was **weakened** by the latest answer |
