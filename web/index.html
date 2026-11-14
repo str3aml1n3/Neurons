@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="An interactive Three.js neural-network toy.">
+    <title>Neurons</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <main>
+      <header class="hud">
+        <div>
+          <p class="eyebrow">INTERACTIVE NEURAL TOY</p>
+          <h1>NEURONS</h1>
+          <p id="subtitle">Digit: <strong id="digit">0</strong> <span>Small: 0-4 / Big: 5-9</span></p>
+        </div>
+        <button id="reset" type="button">Reset simulation</button>
+      </header>
+      <section id="scene-wrap" aria-label="Rotatable neural-network cube">
+        <canvas id="scene"></canvas>
+      </section>
+      <footer class="hud footer">
+        <p id="status" aria-live="polite">Growing connections</p>
+        <p id="score">Rewards: 0 / 0</p>
+        <p id="hint">Drag to rotate. Gold segments are inputs; blue to red is the output.</p>
+      </footer>
+    </main>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.171.0/build/three.module.js"
+        }
+      }
+    </script>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

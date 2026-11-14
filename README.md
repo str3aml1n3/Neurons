@@ -24,6 +24,17 @@ research on [neurite outgrowth](https://journals.plos.org/plosone/article?id=10.
 and [dopamine reward signals](https://pmc.ncbi.nlm.nih.gov/articles/PMC8116345/);
 it does not implement those papers' full models.
 
+## Web app
+
+The same simulation is available as a browser-based [Three.js](https://threejs.org/)
+app in `web/`. It displays the transparent neural cube in 3D and supports drag
+or touch rotation, reset, signal propagation, connection growth, rewards, and
+the seven-segment digit/output-strip behavior of the Android app.
+
+The **Deploy web app to GitHub Pages** workflow publishes the `web/` directory
+from `main`. Once GitHub Pages is enabled for the repository, open
+`https://str3aml1n3.github.io/neuron-sim/`.
+
 ## Download and install
 
 Open the repository's **Actions** tab, select a successful **Android APK**
