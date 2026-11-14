@@ -1,26 +1,29 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'https://unpkg.com/three@0.171.0/examples/jsm/controls/OrbitControls.js';
+import { RoundedBoxGeometry } from 'https://unpkg.com/three@0.171.0/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { Brain, SEGMENT_CELLS, SIZE, keyOf } from './brain.js';
 
 const STEP_MS = 100;
 // Every color stands for a role; styles.css uses the same values for the legend.
+// A calm palette after fluorescence images of real neurons: ivory bodies, teal
+// dendrites, amber axons. A synapse is drawn as the two meeting (an amber
+// bouton against a teal spine head), so it needs no colour of its own.
 const COLORS = {
-  neuron: 0xeef6ff,
-  dendrite: 0x4fd8e8,
-  axon: 0xff8a5c,
-  synapse: 0xb7ff6a,
-  spike: 0xfff6c2,
-  spikeGlow: 0xffc23a,
-  dark: 0xb28cff, // dark-channel signals, on their first hop
-  inhibitory: 0xff4fd8, // inhibitory neurons, their axons, synapses and signals
-  darkCell: 0x2a2140,
-  small: 0x3f7dff,
-  big: 0xff4d5e,
+  neuron: 0xf3ede2, // ivory cell bodies
+  dendrite: 0x4fc9b0, // teal: signals in
+  axon: 0xf0a24e, // amber: signals out
+  spike: 0xfffbe8,
+  spikeGlow: 0xffd27a,
+  dark: 0xa59bff, // lavender: dark-channel signals, on their first hop
+  inhibitory: 0xe8679f, // rose: inhibitory neurons, their axons, synapses and signals
+  darkCell: 0x26213f,
+  small: 0x5a8dff,
+  big: 0xff6464,
   neutral: 0x4a5266,
-  gold: 0xffc64b,
-  frame: 0x88d9ff,
-  strengthen: 0xffc64b, // synapse strengthened (dopamine gold)
-  weaken: 0x4f9dff, // synapse weakened (ice blue)
+  gold: 0xffcf6b, // lit digit segments and dopamine
+  frame: 0x7fb6d9,
+  strengthen: 0xffd27a, // synapse strengthened (dopamine gold)
+  weaken: 0x7aa7ff, // synapse weakened (cool blue)
   prune: 0x8e97a8, // synapse removed
   form: 0xffffff, // new synapse
 };
@@ -45,7 +48,7 @@ controls.enableDamping = true;
 controls.enablePan = false;
 controls.target.set(0, 0, 0);
 
-scene.add(new THREE.AmbientLight(0x8db7e8, 1.6));
+scene.add(new THREE.AmbientLight(0xd6dbe4, 1.5)); // near-neutral, so ivory stays ivory
 const keyLight = new THREE.PointLight(0x9fe6ff, 30, 40);
 keyLight.position.set(-7, 9, -10);
 scene.add(keyLight);
@@ -73,7 +76,7 @@ for (let a = 0; a <= SIZE; a += 1) {
 const gridGeometry = new THREE.BufferGeometry();
 gridGeometry.setAttribute('position', new THREE.Float32BufferAttribute(gridPositions, 3));
 cube.add(new THREE.LineSegments(gridGeometry, new THREE.LineBasicMaterial({
-  color: 0x58bce8, transparent: true, opacity: 0.07, depthWrite: false,
+  color: 0x4f86a8, transparent: true, opacity: 0.05, depthWrite: false,
 })));
 
 // Grid x is mirrored so the digit reads left-to-right from the default front view.
@@ -132,7 +135,8 @@ function finish(mesh, count) {
 
 // Input and output cells are whole cubes inside the grid's front and back
 // layers. Digit cells are split by how visible they should be right now.
-const ioGeometry = new THREE.BoxGeometry(0.78, 0.78, 0.78);
+// Rounded cells: each still fills one grid cell, but reads as a soft sensor, not a block.
+const ioGeometry = new RoundedBoxGeometry(0.78, 0.78, 0.78, 3, 0.16);
 const digitCells = SEGMENT_CELLS.map((cell) => ({ cell, position: cellToVector(cell) }));
 const digitLit = instanced(ioGeometry, new THREE.MeshLambertMaterial({
   emissive: 0xa96400, emissiveIntensity: 0.6, transparent: true, opacity: 0.92,
@@ -158,7 +162,7 @@ finish(outputMesh, SIZE);
 
 // Faint tinted cube on every cell a connector occupies.
 const occupancy = instanced(new THREE.BoxGeometry(0.94, 0.94, 0.94), new THREE.MeshBasicMaterial({
-  transparent: true, opacity: 0.06, depthWrite: false,
+  transparent: true, opacity: 0.035, depthWrite: false,
 }), SIZE ** 3);
 
 // Connectors grow cell by cell, but are drawn as smooth curves that cut the
@@ -228,9 +232,14 @@ const HALO_SIZE = 1 / Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2); // wor
 const inhibitoryBarMesh = instanced(new THREE.CylinderGeometry(0.24, 0.24, 0.07, 18), new THREE.MeshLambertMaterial({
   emissive: COLORS.inhibitory, emissiveIntensity: 0.35,
 }), 200);
-const synapseMesh = instanced(new THREE.BoxGeometry(0.36, 0.36, 0.36), new THREE.MeshLambertMaterial({
-  emissive: COLORS.synapse, emissiveIntensity: 0.25,
-}), 400);
+// An excitatory synapse is the axon's round bouton pressed against a spine
+// head on the dendrite. Size shows weight; brightness shows trophic support.
+const synapsePartGeometry = new THREE.SphereGeometry(1, 14, 10);
+const synapseMaterial = () => new THREE.MeshStandardMaterial({
+  roughness: 0.4, emissive: 0xffffff, emissiveIntensity: 0.06,
+});
+const boutonMesh = instanced(synapsePartGeometry, synapseMaterial(), 400);
+const spineMesh = instanced(synapsePartGeometry, synapseMaterial(), 400);
 
 // Synapse events (strengthened, weakened, pruned, formed) show as short-lived
 // rings that face the camera: one instanced mesh for all of them.
@@ -376,8 +385,7 @@ function updateConnectors() {
       segmentMesh.setColorAt(segments, tint);
       segments += 1;
       // A joint rounds each bend; a connected axon ends in a bouton.
-      const bouton = j === last && connector.type === 'axon' && connector.synapse && !connector.synapse.inhibitory;
-      place(jointMesh, joints, b, bouton ? base * 2.6 : taper(connector, base, j / last, j / SUBSTEPS));
+      place(jointMesh, joints, b, taper(connector, base, j / last, j / SUBSTEPS));
       jointMesh.setColorAt(joints, tint);
       joints += 1;
     }
@@ -503,12 +511,15 @@ function updateSpikes(frac) {
 
 const haloRest = new THREE.Color(COLORS.dendrite);
 const haloInhibitory = new THREE.Color(COLORS.inhibitory);
-const somaInhibitory = new THREE.Color(1, 0.6, 0.92);
+const somaInhibitory = new THREE.Color(1, 0.72, 0.82);
 const haloFire = new THREE.Color(COLORS.spikeGlow);
 const gold = new THREE.Color(COLORS.gold);
 const dimGold = new THREE.Color(0x8a7440); // muted lit-channel gold
 const darkFaint = new THREE.Color(0x5e4c8c); // muted dark-channel violet
-const lime = new THREE.Color(COLORS.synapse);
+const axonColor = new THREE.Color(COLORS.axon);
+const dendriteColor = new THREE.Color(COLORS.dendrite);
+const toNeighbour = new THREE.Vector3();
+const partSpot = new THREE.Vector3();
 const barDirection = new THREE.Vector3();
 const barSpot = new THREE.Vector3();
 const barScale = new THREE.Vector3();
@@ -573,7 +584,8 @@ function updateGlow(time) {
   // Size shows weight; brightness shows trophic support, which fades before a
   // prune. Synapses credited for a rewarded answer flash on dopamine.
   const rewardGlow = brain.dopamine > 0.05;
-  let cubes = 0;
+  let boutons = 0;
+  let spines = 0;
   let bars = 0;
   brain.synapses.forEach((synapse) => {
     const strength = synapse.weight / brain.p.maxWeight;
@@ -595,14 +607,29 @@ function updateGlow(time) {
       bars += 1;
       return;
     }
-    if (cubes >= 400) return;
-    place(synapseMesh, cubes, cellToVector(synapse.cell), 0.6 + strength * 0.9 + boost);
-    tint.copy(lime).multiplyScalar(0.35 + support * 0.8);
-    if (credited) tint.lerp(white, brain.dopamine * 0.8);
-    synapseMesh.setColorAt(cubes, tint);
-    cubes += 1;
+    // Each part sits just off the synapse cell, toward its own connector.
+    const radius = 0.1 + strength * 0.09 + boost * 0.1;
+    const brightness = 0.9 + support * 0.7; // above 1 brightens the part's own colour
+    const addPart = (mesh, index, connector, color, size) => {
+      const route = connectorCurve(connector);
+      const point = route.at(-1);
+      toNeighbour.subVectors(route.at(-2) ?? point, point).normalize();
+      place(mesh, index, partSpot.copy(point).addScaledVector(toNeighbour, size * 0.85), size);
+      tint.copy(color).multiplyScalar(brightness);
+      if (credited) tint.lerp(white, brain.dopamine * 0.8);
+      mesh.setColorAt(index, tint);
+    };
+    if (synapse.axon && boutons < 400) {
+      addPart(boutonMesh, boutons, synapse.axon, axonColor, radius * 1.15);
+      boutons += 1;
+    }
+    if (synapse.dendrite && spines < 400) {
+      addPart(spineMesh, spines, synapse.dendrite, dendriteColor, radius);
+      spines += 1;
+    }
   });
-  finish(synapseMesh, cubes);
+  finish(boutonMesh, boutons);
+  finish(spineMesh, spines);
   finish(inhibitoryBarMesh, bars);
 
   frameMaterial.color.setHex(COLORS.frame).lerp(tint.setHex(COLORS.gold), brain.dopamine);
