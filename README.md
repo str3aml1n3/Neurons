@@ -63,14 +63,14 @@ and capture a screenshot with `adb exec-out screencap -p > screenshot.png`.
 Network restrictions, runner architecture, or unavailable acceleration can
 still prevent the emulator from starting.
 
-## Signed release distribution
+## Google Play internal testing
 
-The **Build release for distribution** workflow is manual and runs only from
-the default branch. It creates signed APK and AAB files plus the public upload
-certificate; it does not connect to or publish through Google Play. Use the
-AAB to distribute a release manually through the Google Play Developer Console.
-The application ID is `io.github.str3aml1n3.neurons`; confirm it is available
-in the console before creating the app. It differs from the previous debug-only
+The **Build and publish internal test** workflow is manual, runs only from the
+default branch, and publishes the signed AAB to Google Play's internal testing
+track by default. It also creates a signed APK and the public upload certificate
+as an artifact. Clear the `publish` input to perform a build-only verification.
+The application ID is `io.github.str3aml1n3.neurons`; confirm it is available in
+the console before creating the app. It differs from the previous debug-only
 `com.example.neurons`, so Android treats the new APK as a separate app.
 The application ID cannot be changed after the app is published.
 
@@ -95,18 +95,19 @@ separate app signing key for APKs delivered to users.
 2. Add these GitHub Actions secrets:
    `ANDROID_KEYSTORE_BASE64` (the output of `base64 -w 0 ~/neurons-upload.jks`
    on Linux), `ANDROID_STORE_PASSWORD`, `ANDROID_KEY_ALIAS` (`neurons-upload`
-   above), and `ANDROID_KEY_PASSWORD`. Never paste secret values into a PR or
-   commit.
-3. Run **Build release for distribution** from the default branch with a
+   above), and `ANDROID_KEY_PASSWORD`. Create a Google Cloud service account,
+   enable the Google Play Developer API, grant the service account the minimum
+   release permission for this app in Play Console, then add its JSON key as
+   `PLAY_SERVICE_ACCOUNT_JSON`. Never paste secret values into a PR or commit.
+3. Run **Build and publish internal test** from the default branch with a
    positive `version_code`. Download the `neurons-release-<version>`
    artifact: it contains the signed APK, AAB, and `upload-certificate.pem`.
    The workflow also prints the certificate fingerprints. Compare its SHA-256
    fingerprint with the one from step 1 before registering or uploading it.
 4. Create the app in the Google Play Developer Console using that exact
-   application ID, enroll in Play App Signing if desired, and manually upload
-   the signed AAB to the desired distribution track. Complete the console's
-   required setup and distribution steps. The APK/AAB is signed with the upload
-   key; Play-generated APKs use the Play app signing key.
-5. For later releases, run **Build release for distribution** with a version
-   code greater than every code previously uploaded to the console, then
-   manually upload the new AAB.
+   application ID, enroll in Play App Signing if desired, and complete its
+   required setup. Add testers in **Testing → Internal testing** and share the
+   opt-in link. The APK/AAB is signed with the upload key; Play-generated APKs
+   use the Play app signing key.
+5. For later releases, run **Build and publish internal test** with a version
+   code greater than every code previously uploaded to Google Play.
