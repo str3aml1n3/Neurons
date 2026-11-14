@@ -173,24 +173,44 @@ driven by "bottom dark" (1, 4, 7) that reaches it can veto it on 7.
 
 ## Learning (dopamine)
 
-After an answer, the simulation finds the synapses **responsible** for it:
+After an answer, every vote is judged by **the side it was cast for**,
+whichever side won. For each side, the simulation finds the synapses
+**responsible** for its votes:
 
-1. Start with the output synapses that voted for the chosen side.
+1. Start with the output synapses that voted for that side.
 2. Add every synapse that helped fire the neurons that sent those votes. A
    synapse helped a firing if its signal arrived within 2 ticks before it.
 3. Repeat back through the network, all the way to the digit.
 
 Then:
 
-- **Correct:** dopamine is released, and each responsible synapse is
-  strengthened by +0.2. Each receiving neuron (or output cell) also shares
+- The chain behind votes for the **right** side is strengthened by
+  0.2 × surprise, and each receiving neuron (or output cell) shares
   **1.0 unit of trophic support** among its responsible inputs: one
-  responsible input gets all of it, three get a third each. A new digit is
-  shown.
-- **Wrong:** no dopamine, each responsible synapse is weakened by −0.2, and
-  the same digit is shown again.
+  responsible input gets all of it, three get a third each.
+- The chain behind votes for the **wrong** side is weakened by 0.2 × surprise.
+- After a correct answer a new digit is shown; after a wrong one the same
+  digit is shown again.
 
-Synapses that didn't contribute to the answer are not changed.
+**Surprise** comes from the network's own confidence, with no outside
+bookkeeping. Confidence is the vote margin, |small − big| / (small + big),
+from 0 (even) to 1 (unanimous):
+
+- correct answer: surprise = 1 − confidence. A lopsided vote that turns out
+  right teaches almost nothing; a close call teaches more.
+- wrong answer: surprise = 1 + confidence. A confident mistake teaches most.
+
+This is what real dopamine signals (reward minus expectation), and it keeps
+well-learned digits from pushing their synapses to the maximum while the hard
+digits still need the room. The visible dopamine flash scales with it too.
+
+Both parts can be switched off (\`marginDopamine\`, \`bothSides\`), which gives
+the original rule: only the winning side's chain changes, by a flat ±0.2.
+Together they raised balanced accuracy by 3.4 ± 3.0 points over 40 networks
+(77.0% → 80.4%), mostly on the hard digits (3: 58% → 70%, 7: 48% → 62%).
+Each alone made no measurable difference.
+
+Synapses that didn't contribute to any vote are not changed.
 
 **Inhibitory synapses** are judged by whom they suppressed. A vetoed neuron
 didn't fire, so it isn't in the responsible chain. Instead, each neuron
@@ -248,12 +268,17 @@ and the same accuracy (see
 
 The headless test (`node tests/brain.test.mjs`) runs 5 random networks for
 30,000 ticks each. Over each run's last 300 answers, accuracy averages about
-**69%** (chance is 50%). It learns, but only modestly. Results vary a lot
-between networks: averages over 10 networks still move by 3–4 points from one
-set of networks to another, so the experiments below use two or three sets.
+**78%** (chance is 50%). Results vary a lot between networks: averages over 10
+networks still move by 3–4 points from one set of networks to another.
 
-**Longer training helps a little.** Measured as balanced accuracy over the last
-400 answers of 10 networks:
+**The experiments below were run before the current learning rule** (surprise
+and both-sides learning, see [Learning](#learning-dopamine)), mostly on 10
+networks, so their baselines are a few points lower and differences under
+about 4 points in them are noise. The
+[review](#review-where-the-accuracy-is-lost) at the end used 40 networks.
+
+**Longer training helps a little.** Measured with the earlier rule, as balanced
+accuracy over the last 400 answers of 10 networks:
 
 | Training | Balanced accuracy | Range |
 | --- | --- | --- |
@@ -624,6 +649,47 @@ networks each):
   to both output halves, with learned weights, as output neurons in real brains
   sample from very many upstream cells.
 
+### Review: where the accuracy is lost
+
+A later review froze 10 trained networks (original rule), showed them random
+digits, and compared their answers with what the same networks could have
+reached:
+
+| | Accuracy |
+| --- | --- |
+| The network's own answers | 75% |
+| Best possible weights on its existing output synapses | 85% |
+| The same synapses, each free to vote for either side | 88% |
+| Any weighted readout of which neurons fired | 97% |
+
+So the neurons carry nearly all the information. About 10 points were lost
+because learning did not find good weights for the wiring it had, and about 12
+because only 9–12 synapses reach the output strip.
+
+**Weights.** Under the original rule, 56% of output synapses sat at the
+maximum weight, so the readout could not tell a reliable neuron from a mediocre
+one. Tested on 40 networks each (balanced accuracy, ± is the 95% interval of
+the paired difference from the baseline):
+
+| Change | 40,000 ticks | 200,000 ticks |
+| --- | --- | --- |
+| Baseline (original rule) | 77.0% | 78.4% |
+| Soft weight limits (\`softBounds\`), several rates | −2.4 to +2.0 | |
+| Both-sides learning alone | −0.9 ± 2.5 | |
+| Surprise from the vote margin alone | +0.6 ± 3.2 | |
+| **Surprise + both sides** (now the default) | **+3.4 ± 3.0** | +2.6 ± 2.3 |
+| …with 24 neurons | +4.0 ± 2.7 | +5.0 ± 2.3 |
+| …with direct digit-to-output links (\`directIO\`) | +5.1 ± 2.7 | **+7.4 ± 1.8** (85.8%) |
+| …with no elimination, more axons, or en passant | −3.3 to −0.2 | |
+
+- **Surprise and both-sides learning work only together.** It is the
+  perceptron's recipe: change little when confidently right, a lot when wrong,
+  and correct every vote by its own side.
+- **Direct links help most.** With \`directIO\`, a digit channel may connect
+  straight to an output cell, which gives the readout clean single-segment
+  votes. It is off by default because signals then bypass the neurons.
+- **More wiring still hurts** when it adds synapses indiscriminately.
+
 ## What you see
 
 | Visual | Meaning |
@@ -642,7 +708,7 @@ networks each):
 | Gold cells with softened corners (front, outer) | Lit-channel cells; bright while their segment is lit, faint gold otherwise |
 | Lavender cells (front, inner) | Dark-channel cells; glow while their segment is unlit and flash when they fire, faint otherwise |
 | Blue and red cells (back) | Output strip: blue = small, red = big |
-| Gold cube outline | Dopamine is being released |
+| Gold cube outline | Dopamine is being released. It is brighter the more surprising the correct answer was. |
 | Gold ring, expanding | A synapse was **strengthened** by the latest answer (and, on a correct answer, gained trophic support) |
 | Blue ring, contracting | A synapse was **weakened** by the latest answer |
 | Grey ring, bursting | A synapse was **pruned**: its weight or its trophic support ran out |
@@ -722,4 +788,8 @@ All values live in `PARAMS` in [`web/brain.js`](../web/brain.js).
 | `enPassantChance` | 0.02 | Chance per neighbouring pair per look |
 | `maxContacts` | 4 | En passant synapses per connector |
 | `readoutOnly` | false | Experimental mushroom-body rule: dopamine changes only output-strip synapses |
+| `marginDopamine` | true | Weight changes scale with surprise, read from the vote margin |
+| `bothSides` | true | Votes for the losing side are corrected too |
+| `softBounds` | false | Experimental: weight changes shrink near the weight limits |
+| `directIO` | false | Experimental: digit cells may connect straight to output cells |
 | `pause` | 12 | Ticks between trials |

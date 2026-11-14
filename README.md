@@ -23,13 +23,14 @@ learns to tell **small** digits (0–4) from **big** ones (5–9).
   of the neurons are **inhibitory**: they connect to other neurons' bodies and
   pull their charge down, so the network can learn "this, but not that". There,
   blue cells vote *small* and red cells vote *big*.
-- A correct answer releases **dopamine**, which strengthens the synapses that
-  produced it. A wrong answer weakens them. Synapses compete for limited
+- A correct answer releases **dopamine**. Synapses behind votes for the right
+  side are strengthened and those behind votes for the wrong side weakened,
+  more so the more surprising the outcome was. Synapses compete for limited
   support from rewarded answers, and weak or unsupported ones are pruned:
   they pull back partway and regrow nearby, avoiding the old partner.
 
 The full rules, parameters and the meaning of every color are in
-**[docs/neurons.md](docs/neurons.md)**. It currently reaches about 70% accuracy
+**[docs/neurons.md](docs/neurons.md)**. It currently reaches about 80% accuracy
 (chance is 50%).
 
 Drag with a mouse or finger to rotate the cube, and pinch or scroll to zoom.

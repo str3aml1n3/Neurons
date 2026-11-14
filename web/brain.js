@@ -93,6 +93,11 @@ export const PARAMS = {
   // Mushroom-body learning (off by default): dopamine changes only the synapses
   // onto the output strip; the inner network keeps the synapses it uses.
   readoutOnly: false,
+  // How reward is applied (see docs/neurons.md, Learning):
+  marginDopamine: true, // dopamine scales with surprise, read from the network's own vote margin
+  bothSides: true, // every vote is judged by its side: right-side votes up, wrong-side votes down
+  softBounds: false, // experimental: weight changes shrink near the limits
+  directIO: false, // experimental: digit cells may connect straight to output cells
   reward: 0.2,
   punish: 0.2,
   pause: 12,
@@ -467,7 +472,7 @@ export class Brain {
   // straight to outputs, so every path passes through at least one neuron.
   canLink(from, to) {
     return from !== to && from.kind !== 'output' && to.kind !== 'input'
-      && !(from.kind === 'input' && to.kind === 'output');
+      && (this.p.directIO || !(from.kind === 'input' && to.kind === 'output'));
   }
 
   // An inhibitory axon connects only where its tip reaches another neuron's
@@ -950,9 +955,21 @@ export class Brain {
   // right and weakened if it was wrong, and inhibition is judged by whom it
   // suppressed.
   learnEverywhere(side, correct, change) {
-    const behindAnswer = this.eligible(side);
-    behindAnswer.forEach((s) => change(s, correct ? this.p.reward : -this.p.punish));
-    if (correct) this.shareTrophic([...behindAnswer]);
+    let behindAnswer;
+    if (this.p.bothSides) {
+      // Every vote is judged by the side it was cast for, whichever side won:
+      // the chain behind right-side votes is strengthened, the chain behind
+      // wrong-side votes weakened.
+      const rightSide = this.digit < 5 ? 'small' : 'big';
+      behindAnswer = this.eligible(rightSide);
+      behindAnswer.forEach((s) => change(s, this.p.reward));
+      this.shareTrophic([...behindAnswer]);
+      this.eligible(rightSide === 'small' ? 'big' : 'small').forEach((s) => change(s, -this.p.punish));
+    } else {
+      behindAnswer = this.eligible(side);
+      behindAnswer.forEach((s) => change(s, correct ? this.p.reward : -this.p.punish));
+      if (correct) this.shareTrophic([...behindAnswer]);
+    }
     // Inhibition: helpful inhibitory synapses, and the chain that fired their
     // neurons, are strengthened; harmful ones and their chain are weakened.
     // So an inhibitory neuron learns which digits to fire for, not just whom
@@ -991,9 +1008,15 @@ export class Brain {
     this.history.push(correct);
     // Net change per synapse; applied (and reported) once all rules have run.
     const deltas = new Map();
+    // Surprise from the network's own confidence: a lopsided vote that turns
+    // out right teaches little, a close call more, and a confident mistake
+    // most. Confidence is the vote margin, 0 (even) to 1 (unanimous).
+    const { small, big } = this.votes;
+    const confidence = Math.abs(small - big) / (small + big || 1);
+    this.surprise = this.p.marginDopamine ? (correct ? 1 - confidence : 1 + confidence) : 1;
     const change = (synapse, amount) => {
       const credit = synapse.credit > 0 ? synapse.credit : 1;
-      deltas.set(synapse, (deltas.get(synapse) ?? 0) + amount * credit);
+      deltas.set(synapse, (deltas.get(synapse) ?? 0) + amount * credit * this.surprise);
     };
     if (this.p.readoutOnly) {
       this.learnReadout(change);
@@ -1004,7 +1027,12 @@ export class Brain {
     let weakened = 0;
     deltas.forEach((amount, synapse) => {
       if (amount === 0) return;
-      synapse.weight = Math.max(this.p.minWeight, Math.min(this.p.maxWeight, synapse.weight + amount));
+      // Soft bounds: a change is scaled by the room left to the limit, so a
+      // weight settles where rewards and punishments balance instead of
+      // running into the maximum.
+      const room = amount > 0 ? this.p.maxWeight - synapse.weight : synapse.weight - this.p.minWeight;
+      const step = this.p.softBounds ? amount * room : amount;
+      synapse.weight = Math.max(this.p.minWeight, Math.min(this.p.maxWeight, synapse.weight + step));
       this.events.push({ type: amount > 0 ? 'strengthen' : 'weaken', synapse });
       if (amount > 0) strengthened += 1;
       else weakened += 1;
@@ -1018,7 +1046,8 @@ export class Brain {
     this.lastChanges = { strengthened, weakened, pruned: before - this.synapses.length };
     if (correct) {
       this.rewards += 1;
-      this.dopamine = 1;
+      // The visible flash follows the surprise: routine successes glow faintly.
+      this.dopamine = this.p.marginDopamine ? Math.max(0.25, Math.min(1, this.surprise)) : 1;
       this.status = 'Correct! Dopamine reward';
       const next = this.randInt(9);
       this.digit = next >= this.digit ? next + 1 : next;
