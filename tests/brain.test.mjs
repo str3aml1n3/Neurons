@@ -17,8 +17,8 @@ const manhattan = (a, b) => Math.abs(a.x - b.x) + Math.abs(a.y - b.y) + Math.abs
 
 function checkInvariants(brain) {
   brain.neurons.forEach((n) => {
-    assert.ok(n.axons.length >= 1 && n.axons.length <= PARAMS.maxConnectors, 'neuron has 1-3 axons');
-    assert.ok(n.dendrites.length >= 1 && n.dendrites.length <= PARAMS.maxConnectors, 'neuron has 1-3 dendrites');
+    assert.ok(n.axons.length >= 1 && n.axons.length <= PARAMS.maxAxons, 'neuron has 1-3 axons');
+    assert.ok(n.dendrites.length >= 1 && n.dendrites.length <= PARAMS.maxDendrites, 'neuron has 1-3 dendrites');
   });
   const owners = new Map();
   brain.connectors.forEach((c) => {

@@ -266,6 +266,38 @@ remain near chance. Learning those needs neurons that reliably respond to
 specific combinations, which this small network with simple credit assignment
 rarely develops.
 
+### What the size parameters do
+
+A sweep varied one parameter at a time from the defaults, 10 networks of
+40,000 ticks each. At the defaults, individual networks range from 60% to 77%,
+so differences of about 3 points or less are noise.
+
+| Change | Accuracy |
+| --- | --- |
+| Defaults (cube 9, 16 neurons, ≤3 axons, ≤3 dendrites) | 68.9% |
+| Cube 11 / 13 / 15 | 66.9 / 64.5 / 58.1% |
+| Cube 13 with longer reach (14 cells, 42 steps) | 66.2% |
+| Cube 13 with 48 neurons (same density) | 66.3% |
+| Neurons 8 / 12 / 24 / 32 | 65.8 / 68.1 / 70.1 / 68.5% |
+| Axons ≤1 / ≤2 / ≤5 | 69.5 / 67.9 / 64.7% |
+| Dendrites ≤1 / ≤2 / ≤5 | 62.6 / 69.3 / 67.8% |
+| Axons ≤5 and dendrites ≤5 | 65.8% |
+
+- **A bigger cube hurts.** The input and output stay the same size, so extra
+  space only adds distance: connectors take longer to reach anything, fewer
+  answers happen, and some networks barely learn. Longer reach recovers about
+  half of the loss; keeping the neuron density doesn't help.
+- **Network size barely matters** from 12 to 32 neurons.
+- **One dendrite per neuron is too few:** neurons get about one input each and
+  can't combine anything. Two or more is enough.
+- **More connectors don't help, and more axons slightly hurt** (crowding and
+  competition for dendrites). Five dendrites raise the average excitatory
+  inputs per neuron from 1.9 to 2.7 without changing accuracy.
+- **3 and 7 stay near chance in every configuration.** The ceiling of about
+  70% doesn't respond to size, space or connectivity, which points to the
+  learning rule (one flat ±0.2 for every responsible synapse) rather than to
+  capacity.
+
 ## What you see
 
 | Visual | Meaning |
@@ -300,8 +332,10 @@ All values live in `PARAMS` in [`web/brain.js`](../web/brain.js).
 
 | Parameter | Value | Meaning |
 | --- | --- | --- |
+| `size` | 9 | Cube edge in cells. On a bigger cube the 9-wide digit and output strip are centered on their faces. (The app always draws 9.) |
 | `neurons` | 16 | Number of neurons |
-| `maxConnectors` | 3 | Max dendrites and max axons per neuron |
+| `maxAxons` | 3 | Each neuron gets 1 to this many axons |
+| `maxDendrites` | 3 | Each neuron gets 1 to this many dendrites |
 | `maxLength` | 10 | Longest straightened path before a connector gives up |
 | `maxSteps` | 30 | Tip steps without connecting before a connector gives up |
 | `stuckLimit` | 6 | Blocked steps tolerated before giving up |

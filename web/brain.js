@@ -2,7 +2,8 @@
 // tests/brain.test.mjs runs it headless in Node. docs/neurons.md describes the
 // behavior in plain language; keep it in sync with this file.
 //
-// The cube is a SIZE³ grid of cells, and each cell holds at most one thing.
+// The cube is a size³ grid of cells (9 by default), and each cell holds at
+// most one thing.
 // Nodes grow connectors one whole cell at a time: dendrites carry signals in,
 // axons carry them out. A synapse forms where a growing tip enters a cell held
 // by the opposite kind of connector. Nodes are:
@@ -15,12 +16,14 @@
 //   - outputs: the strip cells on the back face, 1 dendrite each
 // Input and output cells also accept connectors that reach them directly.
 
-export const SIZE = 9;
+export const SIZE = 9; // default cube size; the app draws this size
 export const DIGITS = [63, 6, 91, 79, 102, 109, 125, 7, 127, 111];
 
 export const PARAMS = {
   neurons: 16,
-  maxConnectors: 3, // each neuron gets 1..3 dendrites and 1..3 axons
+  size: 9, // cube edge in cells; the digit and output strip stay 9 wide, centered
+  maxAxons: 3, // each neuron gets 1..maxAxons axons
+  maxDendrites: 3, // and 1..maxDendrites dendrites
   maxLength: 10, // longest (straightened) connector before it gives up
   maxSteps: 30, // tip steps without connecting before it gives up
   stuckLimit: 6, // blocked growth attempts before retracting
@@ -103,14 +106,22 @@ for (let x = 0; x < SIZE; x += 1) {
 }
 
 const NEIGHBORS = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
-export const keyOf = ({ x, y, z }) => x + y * SIZE + z * SIZE * SIZE;
-const inside = ({ x, y, z }) => x >= 0 && y >= 0 && z >= 0 && x < SIZE && y < SIZE && z < SIZE;
+// Fixed strides, so keys work for any cube size up to 64.
+export const keyOf = ({ x, y, z }) => x + y * 64 + z * 4096;
 const manhattan = (a, b) => Math.abs(a.x - b.x) + Math.abs(a.y - b.y) + Math.abs(a.z - b.z);
 
 export class Brain {
   constructor(random = Math.random, params = {}) {
     this.random = random;
     this.p = { ...PARAMS, ...params };
+    this.size = this.p.size;
+    // The digit and output strip are laid out for a 9-wide face; on a bigger
+    // cube they are centered on the front and back faces.
+    const offset = Math.floor((this.size - 9) / 2);
+    this.segmentCells = SEGMENT_CELLS.map((c) => ({ ...c, x: c.x + offset, y: c.y + offset }));
+    this.outputCells = OUTPUT_CELLS.map((c) => ({
+      ...c, strip: c.x, x: c.x + offset, y: c.y + offset, z: this.size - 1,
+    }));
     this.tick = 0;
     this.cells = new Map(); // cell key -> { kind: 'node' | 'connector' | 'synapse', ... }
     this.nodes = [];
@@ -139,6 +150,10 @@ export class Brain {
     this.startTrial();
   }
 
+  inside({ x, y, z }) {
+    return x >= 0 && y >= 0 && z >= 0 && x < this.size && y < this.size && z < this.size;
+  }
+
   randInt(n) {
     return Math.floor(this.random() * n);
   }
@@ -164,14 +179,15 @@ export class Brain {
   createIONodes() {
     for (let segment = 0; segment < 7; segment += 1) {
       ['lit', 'dark'].forEach((channel) => {
-        const cells = SEGMENT_CELLS.filter((c) => c.segment === segment && c.channel === channel);
+        const cells = this.segmentCells.filter((c) => c.segment === segment && c.channel === channel);
         const node = this.addNode({ kind: 'input', segment, channel, cells, soma: this.pick(cells) });
         node.axons.push(this.newConnector(node, 'axon'));
         this.inputs.push(node);
       });
     }
-    OUTPUT_CELLS.forEach((cell) => {
-      const node = this.addNode({ kind: 'output', soma: cell, x: cell.x, small: cell.small });
+    this.outputCells.forEach((cell) => {
+      // x is the cell's position along the strip (0-8), whatever the cube size.
+      const node = this.addNode({ kind: 'output', soma: cell, x: cell.strip, small: cell.small });
       node.dendrites.push(this.newConnector(node, 'dendrite'));
       this.outputs.push(node);
     });
@@ -180,7 +196,8 @@ export class Brain {
   placeNeurons() {
     for (let i = 0; i < this.p.neurons; i += 1) {
       for (let attempt = 0; attempt < 300; attempt += 1) {
-        const soma = { x: 1 + this.randInt(7), y: 1 + this.randInt(7), z: 1 + this.randInt(7) };
+        const span = this.size - 2;
+        const soma = { x: 1 + this.randInt(span), y: 1 + this.randInt(span), z: 1 + this.randInt(span) };
         const crowded = this.neurons.some((n) => Math.max(
           Math.abs(n.soma.x - soma.x), Math.abs(n.soma.y - soma.y), Math.abs(n.soma.z - soma.z),
         ) < 2);
@@ -194,9 +211,12 @@ export class Brain {
     }
     // Connectors are created after placement so they can aim at other neurons.
     this.neurons.forEach((neuron) => {
-      const count = () => 1 + this.randInt(this.p.maxConnectors);
-      for (let a = count(); a > 0; a -= 1) neuron.axons.push(this.newConnector(neuron, 'axon'));
-      for (let d = count(); d > 0; d -= 1) neuron.dendrites.push(this.newConnector(neuron, 'dendrite'));
+      for (let a = 1 + this.randInt(this.p.maxAxons); a > 0; a -= 1) {
+        neuron.axons.push(this.newConnector(neuron, 'axon'));
+      }
+      for (let d = 1 + this.randInt(this.p.maxDendrites); d > 0; d -= 1) {
+        neuron.dendrites.push(this.newConnector(neuron, 'dendrite'));
+      }
     });
   }
 
@@ -230,7 +250,7 @@ export class Brain {
     const towardNeuron = connector.owner.kind !== 'neuron' || inhibitoryAxon
       || (others.length && this.random() < 0.5);
     if (towardNeuron && others.length) connector.goal = this.pick(others).soma;
-    else connector.goal = connector.type === 'axon' ? this.pick(OUTPUT_CELLS) : this.pick(SEGMENT_CELLS);
+    else connector.goal = connector.type === 'axon' ? this.pick(this.outputCells) : this.pick(this.segmentCells);
   }
 
   // A goal near the connector's tip or, with clustering, near the owner's
@@ -243,7 +263,7 @@ export class Brain {
     const clustered = best && this.random() < this.p.cluster;
     const center = clustered ? best.cell : this.tip(connector);
     const radius = clustered ? this.p.clusterRadius : this.p.localRadius;
-    const near = (v) => Math.max(0, Math.min(SIZE - 1, v + this.randInt(2 * radius + 1) - radius));
+    const near = (v) => Math.max(0, Math.min(this.size - 1, v + this.randInt(2 * radius + 1) - radius));
     return { x: near(center.x), y: near(center.y), z: near(center.z) };
   }
 
@@ -269,7 +289,7 @@ export class Brain {
     }
     const tip = this.tip(connector);
     const moves = NEIGHBORS.map(([dx, dy, dz]) => ({ x: tip.x + dx, y: tip.y + dy, z: tip.z + dz }))
-      .filter(inside);
+      .filter((cell) => this.inside(cell));
     const closer = moves.filter((m) => manhattan(m, connector.goal) < manhattan(tip, connector.goal));
     const next = this.random() < this.p.drift && closer.length ? this.pick(closer) : this.pick(moves);
     const content = this.cells.get(keyOf(next));
@@ -311,7 +331,7 @@ export class Brain {
       NEIGHBORS.forEach(([dx, dy, dz]) => {
         const next = { x: cell.x + dx, y: cell.y + dy, z: cell.z + dz };
         const key = keyOf(next);
-        if (!inside(next) || parent.has(key)) return;
+        if (!this.inside(next) || parent.has(key)) return;
         const content = this.cells.get(key);
         if (content && !(content.kind === 'connector' && content.connector === connector)) return;
         parent.set(key, cell);
