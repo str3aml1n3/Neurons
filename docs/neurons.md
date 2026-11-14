@@ -22,18 +22,38 @@ Three kinds of node send and receive signals.
 | Node | Where | Grows | Role |
 | --- | --- | --- | --- |
 | **Neuron** | 16 random cells inside the cube, at least 2 cells apart | 1–3 dendrites and 1–3 axons | Adds up incoming signals and fires |
-| **Digit channel** (input) | 7 segments on the front face, 2–3 cells each. Each segment has a **lit** and a **dark** channel, so there are 14. | 1 axon, from a random cell of the channel | The lit channel sends signals while its segment is lit, the dark channel while it is unlit |
+| **Digit channel** (input) | The front face. Each of the 7 segments has a **lit** and a **dark** channel with their own cells, so there are 14. | 1 axon, from a random cell of the channel | The lit channel sends signals while its segment is lit, the dark channel while it is unlit |
 | **Output cell** | 8 cells of the strip on the back face | 1 dendrite | Collects votes: left half *small*, right half *big* (the middle cell is neutral) |
 
 Signals have a direction: **dendrites carry signals in, axons carry them out.**
 
 **Lit and dark channels.** Like the eye's ON and OFF cells, darkness is a
-signal of its own rather than silence. Within each segment, cells alternate
-between the two channels: a 2-cell segment has one of each, and a 3-cell
-segment has two lit cells and one dark. Every digit therefore sends exactly 7
+signal of its own rather than silence. Every digit therefore sends exactly 7
 signals, one per segment, and an unlit segment is evidence the network can
 use. A neuron can't tell a lit signal from a dark one; what a signal means
 comes from which synapse it arrives on.
+
+The two channels have **separate cells** on the front face (z = 0). The lit
+cells form the digit around the outside, and each segment's dark cells form a
+parallel row just inside it. Capitals are lit cells, lowercase are dark cells,
+and `.` is an empty cell:
+
+```text
+y=0  . . A A A A A . .
+y=1  . . a a a a a . .
+y=2  F f . . . . . b B
+y=3  F f . . . . . b B
+y=4  . . G G G G G . .
+y=5  E e g g g g g c C
+y=6  E e . . . . . c C
+y=7  . . d d d d d . .
+y=8  . . D D D D D . .
+```
+
+Segments a–g are top, top right, bottom right, bottom, bottom left, top left
+and middle. Each channel has 23 cells (5 for a, d and g, 2 for the sides), and
+the middle bar's dark row sits just below it. The layout is `SEGMENT_LAYOUT`
+in `web/brain.js`.
 
 ## Growth
 
@@ -175,25 +195,26 @@ that gave up while growing starts over from its body with a new guided goal.
 
 The headless test (`node tests/brain.test.mjs`) runs 5 random networks for
 30,000 ticks each. Over each run's last 300 answers, accuracy averages about
-**63%** (chance is 50%). It learns, but only modestly.
+**67%** (chance is 50%). It learns, but only modestly.
 
 Over 10 networks and 40,000 ticks, the regrowth rules (partial retraction,
 avoiding pruned partners, local and clustered regrowth, trophic competition)
 cut prunes by about 40% and rebuilt same-partner connections by about 70%. They
 improved accuracy only slightly, from about 58% to about 62%, which is close to
 the run-to-run noise. Adding dark channels then raised it to about 64% and cut
-prunes by another quarter.
+prunes by another quarter. Giving the two channels separate cells, with the
+bigger face layout, raised it to about 69%.
 
 **Per digit**, late in training (10 networks):
 
 | Digit | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Correct | 49% | 88% | 75% | 52% | 76% | 89% | 73% | 47% | 59% | 75% |
+| Correct | 48% | 87% | 79% | 60% | 74% | 91% | 94% | 50% | 73% | 70% |
 
 Digits that one dark segment identifies are learned well. The top segment is
 dark only for 1 and 4 (small), top-right only for 5 and 6 (big), and
 bottom-right only for 2 (small). Digits that need a *combination* of segments
-(0, 3, 7, 8) stay near chance. Learning those needs neurons that reliably
+(0, 3, 7) stay near chance. Learning those needs neurons that reliably
 respond to two conditions together, which excitatory-only neurons with this
 simple credit assignment rarely develop.
 
@@ -209,8 +230,8 @@ simple credit assignment rarely develop.
 | Lime cube | Synapse. Size shows weight; glow shows trophic support and fades before a prune. Responsible synapses flash on dopamine. |
 | Gold glowing dot with a trail | A signal traveling one cell per tick |
 | Violet glowing dot | A dark-channel signal, on its way to the first neuron. What a neuron fires is always gold. |
-| Gold cells (front) | Digit segments; bright when lit |
-| Faint violet cells (front) | Dark-channel cells of unlit segments; they flash when they fire |
+| Gold cells (front, outer) | Lit-channel cells; bright while their segment is lit |
+| Violet cells (front, inner) | Dark-channel cells; glow while their segment is unlit and flash when they fire |
 | Blue and red cells (back) | Output strip: blue = small, red = big |
 | Gold cube outline | Dopamine is being released |
 

@@ -16,7 +16,8 @@ learns to tell **small** digits (0–4) from **big** ones (5–9).
   **output strip** on the back face grows dendrites. Neurons can also connect
   to them directly.
 - Each segment has a **lit** and a **dark** channel, like the eye's ON and
-  OFF cells, so an unlit segment sends a signal too.
+  OFF cells, each with its own cells on the front face. An unlit segment sends
+  a signal too.
 - A neuron fires when enough signals arrive
   close together, and its signal travels on toward the output strip. There,
   blue cells vote *small* and red cells vote *big*.
@@ -26,7 +27,7 @@ learns to tell **small** digits (0–4) from **big** ones (5–9).
   they pull back partway and regrow nearby, avoiding the old partner.
 
 The full rules, parameters and the meaning of every color are in
-**[docs/neurons.md](docs/neurons.md)**. It currently reaches about 63% accuracy
+**[docs/neurons.md](docs/neurons.md)**. It currently reaches about 67% accuracy
 (chance is 50%).
 
 Drag with a mouse or finger to rotate the cube, and pinch or scroll to zoom.

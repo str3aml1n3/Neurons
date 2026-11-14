@@ -55,28 +55,39 @@ export const PARAMS = {
   pause: 12,
 };
 
-export function segmentAt(x, y) {
-  if (y === 1 && x >= 2 && x <= 6) return 0;
-  if (x === 7 && y >= 2 && y <= 3) return 1;
-  if (x === 7 && y >= 5 && y <= 6) return 2;
-  if (y === 7 && x >= 2 && x <= 6) return 3;
-  if (x === 1 && y >= 5 && y <= 6) return 4;
-  if (x === 1 && y >= 2 && y <= 3) return 5;
-  if (y === 4 && x >= 2 && x <= 6) return 6;
-  return null;
-}
+// Front face (z = 0), 9 × 9 cells. Each segment has its own lit cells and its
+// own dark cells: the lit cells form the digit around the outside, and each
+// segment's dark cells form a parallel row just inside them. No cell is
+// shared. Capitals are lit cells, lowercase dark cells:
+//   y=0  . . A A A A A . .
+//   y=1  . . a a a a a . .
+//   y=2  F f . . . . . b B
+//   y=3  F f . . . . . b B
+//   y=4  . . G G G G G . .
+//   y=5  E e g g g g g c C
+//   y=6  E e . . . . . c C
+//   y=7  . . d d d d d . .
+//   y=8  . . D D D D D . .
+// Segments are numbered a-g = 0-6, matching the bits in DIGITS.
+const rect = (x0, x1, y0, y1) => {
+  const cells = [];
+  for (let y = y0; y <= y1; y += 1) for (let x = x0; x <= x1; x += 1) cells.push({ x, y });
+  return cells;
+};
+export const SEGMENT_LAYOUT = [
+  { lit: rect(2, 6, 0, 0), dark: rect(2, 6, 1, 1) }, // a: top
+  { lit: rect(8, 8, 2, 3), dark: rect(7, 7, 2, 3) }, // b: top right
+  { lit: rect(8, 8, 5, 6), dark: rect(7, 7, 5, 6) }, // c: bottom right
+  { lit: rect(2, 6, 8, 8), dark: rect(2, 6, 7, 7) }, // d: bottom
+  { lit: rect(0, 0, 5, 6), dark: rect(1, 1, 5, 6) }, // e: bottom left
+  { lit: rect(0, 0, 2, 3), dark: rect(1, 1, 2, 3) }, // f: top left
+  { lit: rect(2, 6, 4, 4), dark: rect(2, 6, 5, 5) }, // g: middle
+];
 
-// Digit segment cells on the front face (z = 0). Within each segment, cells
-// alternate between the lit and dark channel, so every segment has both.
-export const SEGMENT_CELLS = [];
-for (let y = 0; y < SIZE; y += 1) {
-  for (let x = 0; x < SIZE; x += 1) {
-    const segment = segmentAt(x, y);
-    if (segment === null) continue;
-    const index = SEGMENT_CELLS.filter((c) => c.segment === segment).length;
-    SEGMENT_CELLS.push({ x, y, z: 0, segment, channel: index % 2 === 0 ? 'lit' : 'dark' });
-  }
-}
+export const SEGMENT_CELLS = SEGMENT_LAYOUT.flatMap(({ lit, dark }, segment) => [
+  ...lit.map(({ x, y }) => ({ x, y, z: 0, segment, channel: 'lit' })),
+  ...dark.map(({ x, y }) => ({ x, y, z: 0, segment, channel: 'dark' })),
+]);
 
 // Output strip on the back face. x < 4 means small, x > 4 means big, and the
 // middle cell is neutral.

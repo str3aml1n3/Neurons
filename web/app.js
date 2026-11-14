@@ -337,23 +337,20 @@ function updateGlow(time) {
     body.material.emissiveIntensity = 0.25 + charge * 0.5 + flash * 1.5;
   });
   digitCells.forEach(({ cell, mesh }) => {
+    // Each cell belongs to one channel. It glows while its channel is active
+    // (gold for lit cells of a lit segment, violet for dark cells of an unlit
+    // one) and stays faint otherwise, so it doesn't hide the network.
     const input = brain.cells.get(keyOf(cell)).node;
-    const lit = brain.lit(cell.segment);
-    const flash = brain.active(input) ? Math.max(0, 1 - since(input) / 3) : 0;
-    if (lit) {
-      mesh.material.color.setHex(COLORS.gold);
-      mesh.material.emissive.setHex(0xa96400);
-      mesh.material.opacity = 0.92;
-      mesh.material.emissiveIntensity = 0.9 + flash * 1.6;
-    } else if (cell.channel === 'dark') {
-      // An unlit segment's dark channel is what fires; show it faintly violet.
-      mesh.material.color.setHex(COLORS.darkCell);
-      mesh.material.emissive.setHex(COLORS.dark);
-      mesh.material.opacity = 0.25 + flash * 0.5;
-      mesh.material.emissiveIntensity = 0.25 + flash * 1.5;
+    const active = brain.active(input);
+    const flash = active ? Math.max(0, 1 - since(input) / 3) : 0;
+    const dark = cell.channel === 'dark';
+    mesh.material.color.setHex(dark ? COLORS.darkCell : active ? COLORS.gold : 0x6b5a30);
+    mesh.material.emissive.setHex(dark ? COLORS.dark : 0xa96400);
+    if (active) {
+      mesh.material.opacity = dark ? 0.35 + flash * 0.45 : 0.92;
+      mesh.material.emissiveIntensity = dark ? 0.4 + flash * 1.4 : 0.9 + flash * 1.6;
     } else {
-      mesh.material.color.setHex(0x6b5a30);
-      mesh.material.opacity = 0.12; // unlit cells stay faint so they don't hide the network
+      mesh.material.opacity = dark ? 0.08 : 0.12;
       mesh.material.emissiveIntensity = 0.03;
     }
   });
