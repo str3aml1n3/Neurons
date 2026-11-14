@@ -3,8 +3,6 @@ import { OrbitControls } from 'https://unpkg.com/three@0.171.0/examples/jsm/cont
 
 const SIZE = 9;
 const DIGITS = [63, 6, 91, 79, 102, 109, 125, 7, 127, 111];
-const POSITIONS = [[4, 1], [7, 2], [7, 6], [4, 7], [1, 6], [1, 2], [4, 4]];
-
 class Brain {
   constructor() {
     this.neurons = [];
@@ -20,12 +18,23 @@ class Brain {
     this.outputPulse = null;
     this.status = 'Growing connections';
     this.digit = Math.floor(Math.random() * 10);
-    this.layers = Array.from({ length: 3 }, (_, layer) => POSITIONS.map(([x, y]) => {
-      const neuron = { layer, soma: { x, y, z: 1 + layer * 3 }, dendrite: [], edges: [] };
-      neuron.dendrite.push(neuron.soma);
-      this.neurons.push(neuron);
-      return neuron;
-    }));
+    this.layers = [];
+    for (let layer = 0; layer < 3; layer += 1) {
+      const neurons = [];
+      for (let index = 0; index < 7; index += 1) {
+        const neuron = {
+          layer,
+          soma: this.randomSoma(layer, neurons),
+          dendrite: [],
+          dendriteTarget: null,
+          edges: [],
+        };
+        neuron.dendrite.push(neuron.soma);
+        neurons.push(neuron);
+        this.neurons.push(neuron);
+      }
+      this.layers.push(neurons);
+    }
 
     this.layers.forEach((layer, layerIndex) => layer.forEach((source, index) => {
       for (let branch = 0; branch < 2; branch += 1) {
@@ -36,6 +45,31 @@ class Brain {
         });
       }
     }));
+    this.neurons.forEach((neuron) => { neuron.dendriteTarget = this.randomDendriteTarget(neuron.soma); });
+  }
+
+  randomSoma(layer, siblings) {
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      const candidate = {
+        x: 0.8 + Math.random() * 7.4,
+        y: 0.8 + Math.random() * 7.4,
+        z: 1 + layer * 3 + (Math.random() - 0.5) * 0.8,
+      };
+      if (siblings.every((neuron) => Math.hypot(
+        neuron.soma.x - candidate.x,
+        neuron.soma.y - candidate.y,
+        neuron.soma.z - candidate.z,
+      ) > 1.25)) return candidate;
+    }
+    return { x: 1 + siblings.length, y: 1 + (siblings.length % 3) * 3, z: 1 + layer * 3 };
+  }
+
+  randomDendriteTarget(soma) {
+    return {
+      x: Math.max(0.3, Math.min(8.7, soma.x + (Math.random() - 0.5) * 2.2)),
+      y: Math.max(0.3, Math.min(8.7, soma.y + (Math.random() - 0.5) * 2.2)),
+      z: Math.max(0.3, Math.min(8.7, soma.z + (Math.random() - 0.5) * 2.2)),
+    };
   }
 
   step() {
@@ -46,10 +80,7 @@ class Brain {
       if (this.outputPulse.intensity < 0.05) this.outputPulse = null;
     }
     this.neurons.forEach((neuron) => {
-      if (neuron.dendrite.length < 3 && this.ticks % 3 === 0) {
-        const point = neuron.dendrite.at(-1);
-        neuron.dendrite.push({ x: point.x, y: point.y, z: Math.max(0, point.z - 1) });
-      }
+      if (this.ticks % 3 === 0) this.growDendrite(neuron);
       neuron.edges.forEach((edge) => {
         if (!this.isComplete(edge) && this.ticks % 2 === 0) this.grow(edge);
       });
@@ -107,20 +138,52 @@ class Brain {
 
   isComplete(edge) {
     const point = edge.axon.at(-1);
-    return point.x === edge.destination.x && point.y === edge.destination.y && point.z === edge.destination.z;
+    return Math.hypot(
+      point.x - edge.destination.x,
+      point.y - edge.destination.y,
+      point.z - edge.destination.z,
+    ) < 0.02;
   }
 
   grow(edge) {
     const point = edge.axon.at(-1);
-    const axes = [];
-    if (point.x !== edge.destination.x) axes.push('x');
-    if (point.y !== edge.destination.y) axes.push('y');
-    if (point.z !== edge.destination.z) axes.push('z');
-    const axis = axes[Math.floor(Math.random() * axes.length)];
-    edge.axon.push({
-      x: point.x + (axis === 'x' ? Math.sign(edge.destination.x - point.x) : 0),
-      y: point.y + (axis === 'y' ? Math.sign(edge.destination.y - point.y) : 0),
-      z: point.z + (axis === 'z' ? Math.sign(edge.destination.z - point.z) : 0),
+    const dx = edge.destination.x - point.x;
+    const dy = edge.destination.y - point.y;
+    const dz = edge.destination.z - point.z;
+    const distance = Math.hypot(dx, dy, dz);
+    const step = Math.min(0.35, distance);
+    const jitter = 0.16;
+    const length = Math.hypot(
+      dx + (Math.random() - 0.5) * jitter,
+      dy + (Math.random() - 0.5) * jitter,
+      dz + (Math.random() - 0.5) * jitter,
+    );
+    edge.axon.push(distance <= 0.35
+      ? edge.destination
+      : {
+        x: point.x + (step * (dx + (Math.random() - 0.5) * jitter)) / length,
+        y: point.y + (step * (dy + (Math.random() - 0.5) * jitter)) / length,
+        z: point.z + (step * (dz + (Math.random() - 0.5) * jitter)) / length,
+      });
+  }
+
+  growDendrite(neuron) {
+    const point = neuron.dendrite.at(-1);
+    const target = neuron.dendriteTarget;
+    const dx = target.x - point.x;
+    const dy = target.y - point.y;
+    const dz = target.z - point.z;
+    const distance = Math.hypot(dx, dy, dz);
+    if (distance < 0.12 || neuron.dendrite.length > 8) {
+      neuron.dendrite = [neuron.soma];
+      neuron.dendriteTarget = this.randomDendriteTarget(neuron.soma);
+      return;
+    }
+    const step = 0.18;
+    neuron.dendrite.push({
+      x: point.x + (dx * step) / distance,
+      y: point.y + (dy * step) / distance,
+      z: point.z + (dz * step) / distance,
     });
   }
 }
@@ -275,45 +338,13 @@ function curveFromVectors(anchors, seed) {
   return new THREE.CatmullRomCurve3(controls, false, 'centripetal');
 }
 
-function edgeCurve(edge) {
-  const start = pointToVector(edge.source.soma);
-  const end = pointToVector(edge.destination);
-  const span = end.clone().sub(start);
-  const bend = (index) => new THREE.Vector3(
-    Math.sin(edge.curveSeed * 3.13 + index * 2.71),
-    Math.cos(edge.curveSeed * 1.91 + index * 1.37),
-    Math.sin(edge.curveSeed * 4.29 + index * 1.83),
-  ).multiplyScalar(Math.min(0.35, span.length() * 0.045));
-  return new THREE.CatmullRomCurve3([
-    start,
-    start.clone().addScaledVector(span, 0.3).add(bend(1)),
-    start.clone().addScaledVector(span, 0.68).add(bend(2)),
-    end,
-  ], false, 'centripetal');
-}
-
-function edgeProgress(edge) {
-  const source = edge.source.soma;
-  const destination = edge.destination;
-  const steps = Math.abs(destination.x - source.x)
-    + Math.abs(destination.y - source.y)
-    + Math.abs(destination.z - source.z);
-  return Math.min(1, (edge.axon.length - 1) / steps);
-}
-
 function edgeDisplayPoints(edge) {
-  const progress = edgeProgress(edge);
-  if (progress === 0) return [];
-  const curve = edgeCurve(edge);
-  const count = Math.max(2, Math.ceil(progress * 28));
-  return Array.from({ length: count }, (_, index) => curve.getPointAt(
-    (progress * index) / (count - 1),
-  ));
+  return edge.axon.map(pointToVector);
 }
 
 function edgeRadius(edge) {
   const strength = (edge.weight - 0.2) / 4.8;
-  return 0.03 + Math.max(0, Math.min(1, strength)) * 0.09;
+  return 0.015 + Math.max(0, Math.min(1, strength)) * 0.205;
 }
 
 function tubeFromVectors(points, color, radius, opacity, seed) {
@@ -352,6 +383,8 @@ function createVisuals() {
     }));
     soma.position.copy(pointToVector(neuron.soma));
     neuronGroup.add(soma);
+    const dendrite = tubeFromGridPoints(neuron.dendrite, style.line, 0.018, 0.42, 100 + neuron.layer);
+    neuronGroup.add(dendrite);
     const edges = neuron.edges.map((edge) => {
       const tube = tubeFromVectors(
         edgeDisplayPoints(edge), style.line, edgeRadius(edge), 0.95, edge.curveSeed,
@@ -359,7 +392,7 @@ function createVisuals() {
       neuronGroup.add(tube);
       return tube;
     });
-    visuals.set(neuron, { edges });
+    visuals.set(neuron, { dendrite, edges });
   });
 }
 
@@ -382,6 +415,7 @@ function createSensoryLinks() {
 function syncVisuals() {
   brain.neurons.forEach((neuron) => {
     const visual = visuals.get(neuron);
+    updateTube(visual.dendrite, neuron.dendrite);
     neuron.edges.forEach((edge, index) => updateTube(
       visual.edges[index], edgeDisplayPoints(edge), true, edgeRadius(edge),
     ));
@@ -435,7 +469,8 @@ function updateSignalFlow(time) {
     return;
   }
   lastSignalDraw = time;
-  const curve = edgeCurve(brain.signal);
+  const curve = curveFromVectors(brain.signal.axon.map(pointToVector), brain.signal.curveSeed);
+  if (Array.isArray(curve)) return;
   const stepProgress = Math.min(1, (time - lastStep) / 100);
   const progress = Math.min(1, (brain.signalIndex + stepProgress) / (brain.signal.axon.length - 1));
   const start = Math.max(0, progress - 0.35);

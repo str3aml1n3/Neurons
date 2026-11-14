@@ -15,7 +15,7 @@ an incorrect answer weakens them. The simulation runs locally and resets when
 the app is restarted; it does not require network access.
 
 This is an **educational toy, not a biologically accurate brain simulation**.
-It uses a fixed three-layer arrangement, grid-based growth toward selected
+It uses three layers of randomly placed neurons, free-form growth toward selected
 targets, and a simple reward-gated weight update. Dendrites are visual growth
 proxies, not a detailed model of synaptic chemistry; there is no claim of
 reliable learning or biological timescales. The design is loosely inspired by
