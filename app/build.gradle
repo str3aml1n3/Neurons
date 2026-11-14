@@ -7,10 +7,26 @@ android {
     compileSdk 35
 
     defaultConfig {
-        applicationId 'com.example.neurons'
+        applicationId 'io.github.str3aml1n3.neurons'
         minSdk 23
         targetSdk 35
-        versionCode 1
+        versionCode providers.environmentVariable('RELEASE_VERSION_CODE').getOrElse('1').toInteger()
         versionName '1.0'
+    }
+
+    if (System.getenv('RELEASE_KEYSTORE')) {
+        signingConfigs {
+            release {
+                storeFile file(System.getenv('RELEASE_KEYSTORE'))
+                storePassword System.getenv('RELEASE_STORE_PASSWORD')
+                keyAlias System.getenv('RELEASE_KEY_ALIAS')
+                keyPassword System.getenv('RELEASE_KEY_PASSWORD')
+            }
+        }
+        buildTypes {
+            release {
+                signingConfig signingConfigs.release
+            }
+        }
     }
 }
