@@ -7,7 +7,9 @@
 // axons carry them out. A synapse forms where a growing tip enters a cell held
 // by the opposite kind of connector. Nodes are:
 //   - neurons: random cells inside the cube, 1..3 dendrites and 1..3 axons
-//   - inputs: the 7 digit segments on the front face, 1 axon each
+//   - inputs: each digit segment on the front face has a lit channel and a
+//     dark channel (like the eye's ON and OFF cells), 1 axon each. A lit
+//     segment fires its lit channel; an unlit segment fires its dark channel.
 //   - outputs: the strip cells on the back face, 1 dendrite each
 // Input and output cells also accept connectors that reach them directly.
 
@@ -64,12 +66,15 @@ export function segmentAt(x, y) {
   return null;
 }
 
-// Digit segment cells on the front face (z = 0).
+// Digit segment cells on the front face (z = 0). Within each segment, cells
+// alternate between the lit and dark channel, so every segment has both.
 export const SEGMENT_CELLS = [];
 for (let y = 0; y < SIZE; y += 1) {
   for (let x = 0; x < SIZE; x += 1) {
     const segment = segmentAt(x, y);
-    if (segment !== null) SEGMENT_CELLS.push({ x, y, z: 0, segment });
+    if (segment === null) continue;
+    const index = SEGMENT_CELLS.filter((c) => c.segment === segment).length;
+    SEGMENT_CELLS.push({ x, y, z: 0, segment, channel: index % 2 === 0 ? 'lit' : 'dark' });
   }
 }
 
@@ -128,14 +133,17 @@ export class Brain {
     return node;
   }
 
-  // Each segment is one input node covering its 2-3 cells; its axon sprouts
-  // from a random one of them. Each output cell is its own output node.
+  // Each segment has two input nodes, its lit and its dark channel, each
+  // covering that channel's cells; its axon sprouts from a random one of them.
+  // Each output cell is its own output node.
   createIONodes() {
     for (let segment = 0; segment < 7; segment += 1) {
-      const cells = SEGMENT_CELLS.filter((c) => c.segment === segment);
-      const node = this.addNode({ kind: 'input', segment, cells, soma: this.pick(cells) });
-      node.axons.push(this.newConnector(node, 'axon'));
-      this.inputs.push(node);
+      ['lit', 'dark'].forEach((channel) => {
+        const cells = SEGMENT_CELLS.filter((c) => c.segment === segment && c.channel === channel);
+        const node = this.addNode({ kind: 'input', segment, channel, cells, soma: this.pick(cells) });
+        node.axons.push(this.newConnector(node, 'axon'));
+        this.inputs.push(node);
+      });
     }
     OUTPUT_CELLS.forEach((cell) => {
       const node = this.addNode({ kind: 'output', soma: cell, x: cell.x, small: cell.small });
@@ -383,6 +391,11 @@ export class Brain {
     return (DIGITS[this.digit] & (1 << segment)) !== 0;
   }
 
+  // Whether an input channel fires for the current digit.
+  active(input) {
+    return this.lit(input.segment) === (input.channel === 'lit');
+  }
+
   startTrial() {
     this.trialTick = 0;
     this.votes = { small: 0, big: 0 };
@@ -417,7 +430,7 @@ export class Brain {
     this.trialTick += 1;
     if (this.trialTick % this.p.inputPeriod === 1) {
       this.inputs.forEach((input) => {
-        if (!this.lit(input.segment)) return;
+        if (!this.active(input)) return;
         input.lastFired = this.tick;
         this.synapses.forEach((s) => { if (s.from === input) this.emit(s); });
       });

@@ -8,6 +8,7 @@
   --axon: #ff8a5c;
   --synapse: #b7ff6a;
   --spike: #fff6c2;
+  --dark: #b28cff;
   --small: #3f7dff;
   --big: #ff4d5e;
   --gold: #ffc64b;
@@ -197,6 +198,7 @@ button:focus-visible {
 .swatch.axon { height: 0.25rem; background: var(--axon); }
 .swatch.synapse { background: var(--synapse); }
 .swatch.spike { border-radius: 50%; background: var(--spike); box-shadow: 0 0 8px 2px #ffd35a; }
+.swatch.dark { border-radius: 50%; background: #d9c6ff; box-shadow: 0 0 8px 2px var(--dark); }
 .swatch.small { background: var(--small); }
 .swatch.big { background: var(--big); }
 

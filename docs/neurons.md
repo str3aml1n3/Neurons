@@ -22,10 +22,18 @@ Three kinds of node send and receive signals.
 | Node | Where | Grows | Role |
 | --- | --- | --- | --- |
 | **Neuron** | 16 random cells inside the cube, at least 2 cells apart | 1–3 dendrites and 1–3 axons | Adds up incoming signals and fires |
-| **Digit segment** (input) | 7 segments on the front face, 2–3 cells each | 1 axon, from a random cell of the segment | Sends signals while lit |
+| **Digit channel** (input) | 7 segments on the front face, 2–3 cells each. Each segment has a **lit** and a **dark** channel, so there are 14. | 1 axon, from a random cell of the channel | The lit channel sends signals while its segment is lit, the dark channel while it is unlit |
 | **Output cell** | 8 cells of the strip on the back face | 1 dendrite | Collects votes: left half *small*, right half *big* (the middle cell is neutral) |
 
 Signals have a direction: **dendrites carry signals in, axons carry them out.**
+
+**Lit and dark channels.** Like the eye's ON and OFF cells, darkness is a
+signal of its own rather than silence. Within each segment, cells alternate
+between the two channels: a 2-cell segment has one of each, and a 3-cell
+segment has two lit cells and one dark. Every digit therefore sends exactly 7
+signals, one per segment, and an unlit segment is evidence the network can
+use. A neuron can't tell a lit signal from a dark one; what a signal means
+comes from which synapse it arrives on.
 
 ## Growth
 
@@ -67,7 +75,8 @@ growing.
 
 Digit and output cells also connect directly, without growing anything:
 
-- A neuron's **dendrite** that reaches a **digit cell** connects to that segment.
+- A neuron's **dendrite** that reaches a **digit cell** connects to that
+  cell's channel (lit or dark).
 - A neuron's **axon** that reaches an **output cell** connects to it.
 
 Signals always pass through at least one neuron. A digit's axon cannot connect
@@ -84,8 +93,9 @@ Every synapse has:
 
 Time runs in **ticks** (10 per second in the browser).
 
-1. **Input.** Every 5 ticks, each lit digit segment sends a signal through all
-   of its synapses.
+1. **Input.** Every 5 ticks, each segment's active channel sends a signal
+   through all of its synapses: the lit channel if the segment is lit, the dark
+   channel if it isn't.
 2. **Travel.** A signal (spike) moves one cell per tick, along the axon to the
    synapse and then along the dendrite to the receiving body.
 3. **Charge.** When a signal arrives, the neuron's **charge** rises by the
@@ -165,14 +175,27 @@ that gave up while growing starts over from its body with a new guided goal.
 
 The headless test (`node tests/brain.test.mjs`) runs 5 random networks for
 30,000 ticks each. Over each run's last 300 answers, accuracy averages about
-**60%** (chance is 50%). It learns, but only modestly. Excitatory-only neurons,
-a small network and very simple credit assignment limit how far it gets.
+**63%** (chance is 50%). It learns, but only modestly.
 
 Over 10 networks and 40,000 ticks, the regrowth rules (partial retraction,
 avoiding pruned partners, local and clustered regrowth, trophic competition)
 cut prunes by about 40% and rebuilt same-partner connections by about 70%. They
 improved accuracy only slightly, from about 58% to about 62%, which is close to
-the run-to-run noise.
+the run-to-run noise. Adding dark channels then raised it to about 64% and cut
+prunes by another quarter.
+
+**Per digit**, late in training (10 networks):
+
+| Digit | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Correct | 49% | 88% | 75% | 52% | 76% | 89% | 73% | 47% | 59% | 75% |
+
+Digits that one dark segment identifies are learned well. The top segment is
+dark only for 1 and 4 (small), top-right only for 5 and 6 (big), and
+bottom-right only for 2 (small). Digits that need a *combination* of segments
+(0, 3, 7, 8) stay near chance. Learning those needs neurons that reliably
+respond to two conditions together, which excitatory-only neurons with this
+simple credit assignment rarely develop.
 
 ## What you see
 
@@ -184,8 +207,10 @@ the run-to-run noise.
 | Tube thickness | Synapse weight, once connected |
 | Faint tinted cube | A cell occupied by a connector |
 | Lime cube | Synapse. Size shows weight; glow shows trophic support and fades before a prune. Responsible synapses flash on dopamine. |
-| Glowing dot with a trail | A signal traveling one cell per tick |
+| Gold glowing dot with a trail | A signal traveling one cell per tick |
+| Violet glowing dot | A dark-channel signal, on its way to the first neuron. What a neuron fires is always gold. |
 | Gold cells (front) | Digit segments; bright when lit |
+| Faint violet cells (front) | Dark-channel cells of unlit segments; they flash when they fire |
 | Blue and red cells (back) | Output strip: blue = small, red = big |
 | Gold cube outline | Dopamine is being released |
 

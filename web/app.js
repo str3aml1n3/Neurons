@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'https://unpkg.com/three@0.171.0/examples/jsm/controls/OrbitControls.js';
-import { Brain, SEGMENT_CELLS, SIZE } from './brain.js';
+import { Brain, SEGMENT_CELLS, SIZE, keyOf } from './brain.js';
 
 const STEP_MS = 100;
 // Every color stands for a role; styles.css uses the same values for the legend.
@@ -11,6 +11,8 @@ const COLORS = {
   synapse: 0xb7ff6a,
   spike: 0xfff6c2,
   spikeGlow: 0xffc23a,
+  dark: 0xb28cff, // dark-channel signals, on their first hop
+  darkCell: 0x2a2140,
   small: 0x3f7dff,
   big: 0xff4d5e,
   neutral: 0x4a5266,
@@ -131,17 +133,21 @@ const TRAIL = [0, 0.35, 0.7];
 const glowPositions = new Float32Array(MAX_SPIKES * TRAIL.length * 3);
 const glowColors = new Float32Array(MAX_SPIKES * TRAIL.length * 3);
 const corePositions = new Float32Array(MAX_SPIKES * 3);
+const coreColors = new Float32Array(MAX_SPIKES * 3);
 const glowGeometry = new THREE.BufferGeometry();
 glowGeometry.setAttribute('position', new THREE.BufferAttribute(glowPositions, 3));
 glowGeometry.setAttribute('color', new THREE.BufferAttribute(glowColors, 3));
 const coreGeometry = new THREE.BufferGeometry();
 coreGeometry.setAttribute('position', new THREE.BufferAttribute(corePositions, 3));
+coreGeometry.setAttribute('color', new THREE.BufferAttribute(coreColors, 3));
 const pointMaterial = (color, size, vertexColors) => new THREE.PointsMaterial({
   color, size, map: glow, vertexColors, transparent: true, depthTest: false, depthWrite: false,
   blending: THREE.AdditiveBlending,
 });
-const spikeGlow = new THREE.Points(glowGeometry, pointMaterial(COLORS.spikeGlow, 1.3, true));
-const spikeCore = new THREE.Points(coreGeometry, pointMaterial(COLORS.spike, 0.5, false));
+const spikeGlow = new THREE.Points(glowGeometry, pointMaterial(0xffffff, 1.3, true));
+const spikeCore = new THREE.Points(coreGeometry, pointMaterial(0xffffff, 0.5, true));
+const glowTint = { lit: new THREE.Color(COLORS.spikeGlow), dark: new THREE.Color(COLORS.dark) };
+const coreTint = { lit: new THREE.Color(COLORS.spike), dark: new THREE.Color(COLORS.dark).lerp(new THREE.Color(0xffffff), 0.5) };
 spikeGlow.renderOrder = 10;
 spikeCore.renderOrder = 11;
 spikeGlow.frustumCulled = false;
@@ -295,13 +301,20 @@ function updateSpikes(frac) {
   const spikes = brain.spikes.slice(0, MAX_SPIKES);
   spikes.forEach((spike, s) => {
     const head = spike.index + frac;
+    // Dark-channel signals are violet until they reach the first neuron;
+    // whatever a neuron fires is its own (gold) signal.
+    const kind = spike.synapse.from.channel === 'dark' ? 'dark' : 'lit';
     TRAIL.forEach((back, k) => {
       const p = pointOnPath(spike.path, head - back, spot);
       const i = (s * TRAIL.length + k) * 3;
       glowPositions.set([p.x, p.y, p.z], i);
       const fade = 1 - k / TRAIL.length;
-      glowColors.set([fade, fade, fade], i);
-      if (k === 0) corePositions.set([p.x, p.y, p.z], s * 3);
+      const g = glowTint[kind];
+      glowColors.set([g.r * fade, g.g * fade, g.b * fade], i);
+      if (k === 0) {
+        corePositions.set([p.x, p.y, p.z], s * 3);
+        coreColors.set([coreTint[kind].r, coreTint[kind].g, coreTint[kind].b], s * 3);
+      }
     });
   });
   glowGeometry.setDrawRange(0, spikes.length * TRAIL.length);
@@ -309,6 +322,7 @@ function updateSpikes(frac) {
   glowGeometry.attributes.position.needsUpdate = true;
   glowGeometry.attributes.color.needsUpdate = true;
   coreGeometry.attributes.position.needsUpdate = true;
+  coreGeometry.attributes.color.needsUpdate = true;
 }
 
 // Per-frame glow effects: firing, charge, input and output activity, dopamine.
@@ -323,12 +337,25 @@ function updateGlow(time) {
     body.material.emissiveIntensity = 0.25 + charge * 0.5 + flash * 1.5;
   });
   digitCells.forEach(({ cell, mesh }) => {
-    const input = brain.inputs[cell.segment];
+    const input = brain.cells.get(keyOf(cell)).node;
     const lit = brain.lit(cell.segment);
-    const flash = Math.max(0, 1 - since(input) / 3);
-    mesh.material.color.setHex(lit ? COLORS.gold : 0x6b5a30);
-    mesh.material.opacity = lit ? 0.92 : 0.12; // unlit cells stay faint so they don't hide the network
-    mesh.material.emissiveIntensity = lit ? 0.9 + flash * 1.6 : 0.03;
+    const flash = brain.active(input) ? Math.max(0, 1 - since(input) / 3) : 0;
+    if (lit) {
+      mesh.material.color.setHex(COLORS.gold);
+      mesh.material.emissive.setHex(0xa96400);
+      mesh.material.opacity = 0.92;
+      mesh.material.emissiveIntensity = 0.9 + flash * 1.6;
+    } else if (cell.channel === 'dark') {
+      // An unlit segment's dark channel is what fires; show it faintly violet.
+      mesh.material.color.setHex(COLORS.darkCell);
+      mesh.material.emissive.setHex(COLORS.dark);
+      mesh.material.opacity = 0.25 + flash * 0.5;
+      mesh.material.emissiveIntensity = 0.25 + flash * 1.5;
+    } else {
+      mesh.material.color.setHex(0x6b5a30);
+      mesh.material.opacity = 0.12; // unlit cells stay faint so they don't hide the network
+      mesh.material.emissiveIntensity = 0.03;
+    }
   });
   outputCells.forEach(({ x, mesh }) => {
     const node = brain.outputs.find((o) => o.x === x);
