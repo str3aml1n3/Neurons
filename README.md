@@ -66,3 +66,8 @@ The **Deploy web app to GitHub Pages** workflow publishes `web/` whenever a
 push to `main` changes files under `web/`. It can also be run manually from
 the Actions tab. GitHub Pages must be enabled for the repository
 (Settings → Pages → Source: GitHub Actions).
+
+During deploy, the workflow adds the commit hash to the `app.js` and
+`styles.css` URLs in `index.html` (for example `app.js?v=f0f2a08c`). A normal
+reload then loads the new version immediately, instead of waiting out GitHub
+Pages' 10-minute cache. The source `index.html` keeps plain URLs.

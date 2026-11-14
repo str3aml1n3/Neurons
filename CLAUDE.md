@@ -8,7 +8,10 @@ working in this repository. User-facing docs live in `README.md`.
 A browser-only toy neural-network simulation in `web/`: plain HTML, CSS and
 one ES module (`app.js`), using Three.js 0.171.0 from unpkg via an import map.
 There is no build step, no `package.json` and no test suite. Pushes to `main`
-that touch `web/` deploy to GitHub Pages.
+that touch `web/` deploy to GitHub Pages. The deploy workflow adds `?v=<sha>` to
+the `./app.js` and `./styles.css` URLs in `index.html` for cache busting, so
+keep those two references in exactly that form and don't add versions by hand.
+If you add another local file, add it to that workflow step.
 
 In `app.js`, the `Brain` class holds the simulation (neurons, growth,
 signal propagation, reward-gated weights). The code after it does the Three.js
