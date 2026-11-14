@@ -105,6 +105,27 @@ canvas {
   color: #8ca2c0;
 }
 
+#legend {
+  width: 100%;
+  color: #9eb4d2;
+}
+
+#legend span {
+  font-weight: 800;
+}
+
+#legend .input {
+  color: #63e9dc;
+}
+
+#legend .hidden {
+  color: #aa8cff;
+}
+
+#legend .output {
+  color: #ff83bf;
+}
+
 @media (max-width: 650px) {
   .hud {
     align-items: flex-start;

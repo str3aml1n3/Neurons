@@ -19,7 +19,7 @@ class Brain {
     this.status = 'Growing connections';
     this.digit = Math.floor(Math.random() * 10);
     this.layers = Array.from({ length: 3 }, (_, layer) => POSITIONS.map(([x, y]) => {
-      const neuron = { soma: { x, y, z: 1 + layer * 3 }, dendrite: [], edges: [] };
+      const neuron = { layer, soma: { x, y, z: 1 + layer * 3 }, dendrite: [], edges: [] };
       neuron.dendrite.push(neuron.soma);
       this.neurons.push(neuron);
       return neuron;
@@ -146,9 +146,23 @@ const cube = new THREE.Group();
 scene.add(cube);
 const frame = new THREE.LineSegments(
   new THREE.EdgesGeometry(new THREE.BoxGeometry(8.7, 8.7, 8.7)),
-  new THREE.LineBasicMaterial({ color: 0x6da8c7, transparent: true, opacity: 0.6 }),
+  new THREE.LineBasicMaterial({ color: 0x6da8c7, transparent: true, opacity: 0.78 }),
 );
 cube.add(frame);
+const gridPositions = [];
+for (let a = -4; a <= 4; a += 1) {
+  for (let b = -4; b <= 4; b += 1) {
+    gridPositions.push(-4, a, b, 4, a, b);
+    gridPositions.push(a, -4, b, a, 4, b);
+    gridPositions.push(a, b, -4, a, b, 4);
+  }
+}
+const gridGeometry = new THREE.BufferGeometry();
+gridGeometry.setAttribute('position', new THREE.Float32BufferAttribute(gridPositions, 3));
+cube.add(new THREE.LineSegments(
+  gridGeometry,
+  new THREE.LineBasicMaterial({ color: 0x3c7895, transparent: true, opacity: 0.2 }),
+));
 const shell = new THREE.Mesh(
   new THREE.BoxGeometry(8.5, 8.5, 8.5),
   new THREE.MeshPhysicalMaterial({
@@ -163,13 +177,12 @@ const segmentGeometry = new THREE.BoxGeometry(3.2, 0.35, 0.16);
 const verticalSegmentGeometry = new THREE.BoxGeometry(0.35, 2.25, 0.16);
 const segmentMaterial = new THREE.MeshStandardMaterial({ color: 0xffc64b, emissive: 0xa96400, emissiveIntensity: 1.6 });
 [
-  [0, 3, 4.46, 0], [1, 1.25, 4.46, Math.PI / 2], [1, -2.25, 4.46, Math.PI / 2],
-  [0, -3, 4.46, 0], [-1, -2.25, 4.46, Math.PI / 2], [-1, 1.25, 4.46, Math.PI / 2],
-  [0, 0, 4.46, 0],
-].forEach(([x, y, z, rotation], index) => {
-  const mesh = new THREE.Mesh(rotation ? verticalSegmentGeometry : segmentGeometry, segmentMaterial.clone());
+  [0, 3, 4.46, false], [1.75, 1.5, 4.46, true], [1.75, -1.5, 4.46, true],
+  [0, -3, 4.46, false], [-1.75, -1.5, 4.46, true], [-1.75, 1.5, 4.46, true],
+  [0, 0, 4.46, false],
+].forEach(([x, y, z, vertical], index) => {
+  const mesh = new THREE.Mesh(vertical ? verticalSegmentGeometry : segmentGeometry, segmentMaterial.clone());
   mesh.position.set(x, y, z);
-  mesh.rotation.z = rotation;
   cube.add(mesh);
   segments[index] = mesh;
 });
@@ -192,9 +205,11 @@ for (let x = 0; x < SIZE; x += 1) {
 const neuronGroup = new THREE.Group();
 cube.add(neuronGroup);
 const somaGeometry = new THREE.SphereGeometry(0.16, 16, 12);
-const somaMaterial = new THREE.MeshStandardMaterial({ color: 0x61eadb, emissive: 0x117d85, emissiveIntensity: 1.2 });
-const dendriteMaterial = new THREE.LineBasicMaterial({ color: 0x4bc9dc, transparent: true, opacity: 0.72 });
-const axonMaterial = new THREE.LineBasicMaterial({ color: 0x8b70d0, transparent: true, opacity: 0.8 });
+const layerStyles = [
+  { soma: 0x63e9dc, emissive: 0x117d85, line: 0x4bc9dc },
+  { soma: 0xaa8cff, emissive: 0x51349e, line: 0x9578e8 },
+  { soma: 0xff83bf, emissive: 0x9c245d, line: 0xea619f },
+];
 const signalMesh = new THREE.Mesh(
   new THREE.SphereGeometry(0.27, 16, 12),
   new THREE.MeshStandardMaterial({ color: 0xfff267, emissive: 0xffcc24, emissiveIntensity: 2 }),
@@ -205,7 +220,8 @@ cube.add(signalMesh);
 let brain = new Brain();
 const visuals = new Map();
 
-function lineFrom(points, material) {
+function lineFrom(points, color, opacity = 0.8) {
+  const material = new THREE.LineBasicMaterial({ color, transparent: true, opacity });
   return new THREE.Line(new THREE.BufferGeometry().setFromPoints(points.map(pointToVector)), material);
 }
 
@@ -213,13 +229,16 @@ function createVisuals() {
   neuronGroup.clear();
   visuals.clear();
   brain.neurons.forEach((neuron) => {
-    const soma = new THREE.Mesh(somaGeometry, somaMaterial);
+    const style = layerStyles[neuron.layer];
+    const soma = new THREE.Mesh(somaGeometry, new THREE.MeshStandardMaterial({
+      color: style.soma, emissive: style.emissive, emissiveIntensity: 1.2,
+    }));
     soma.position.copy(pointToVector(neuron.soma));
     neuronGroup.add(soma);
-    const dendrite = lineFrom(neuron.dendrite, dendriteMaterial);
+    const dendrite = lineFrom(neuron.dendrite, style.line, 0.72);
     neuronGroup.add(dendrite);
     const edges = neuron.edges.map((edge) => {
-      const line = lineFrom(edge.axon, axonMaterial);
+      const line = lineFrom(edge.axon, style.line);
       neuronGroup.add(line);
       return line;
     });
