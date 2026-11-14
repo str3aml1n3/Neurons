@@ -299,6 +299,11 @@ function edgeDisplayPoints(edge) {
   ));
 }
 
+function edgeRadius(edge) {
+  const strength = (edge.weight - 0.2) / 4.8;
+  return 0.03 + Math.max(0, Math.min(1, strength)) * 0.09;
+}
+
 function tubeFromVectors(points, color, radius, opacity, seed) {
   const curve = curveFromVectors(points, seed);
   const geometry = Array.isArray(curve)
@@ -316,8 +321,9 @@ function tubeFromGridPoints(points, color, radius, opacity, seed) {
   return tubeFromVectors(points.map(pointToVector), color, radius, opacity, seed);
 }
 
-function updateTube(tube, points, areVectors = false) {
+function updateTube(tube, points, areVectors = false, radius = tube.userData.radius) {
   tube.geometry.dispose();
+  tube.userData.radius = radius;
   const curve = curveFromVectors(areVectors ? points : points.map(pointToVector), tube.userData.seed);
   tube.geometry = Array.isArray(curve)
     ? new THREE.BufferGeometry()
@@ -337,7 +343,9 @@ function createVisuals() {
     const dendrite = tubeFromGridPoints(neuron.dendrite, style.line, 0.025, 0.72, 100 + neuronIndex);
     neuronGroup.add(dendrite);
     const edges = neuron.edges.map((edge) => {
-      const tube = tubeFromVectors(edgeDisplayPoints(edge), style.line, 0.06, 0.95, edge.curveSeed);
+      const tube = tubeFromVectors(
+        edgeDisplayPoints(edge), style.line, edgeRadius(edge), 0.95, edge.curveSeed,
+      );
       neuronGroup.add(tube);
       return tube;
     });
@@ -366,7 +374,7 @@ function syncVisuals() {
     const visual = visuals.get(neuron);
     updateTube(visual.dendrite, neuron.dendrite);
     neuron.edges.forEach((edge, index) => updateTube(
-      visual.edges[index], edgeDisplayPoints(edge), true,
+      visual.edges[index], edgeDisplayPoints(edge), true, edgeRadius(edge),
     ));
   });
   digitElement.textContent = brain.digit;
