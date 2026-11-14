@@ -29,7 +29,7 @@ learns to tell **small** digits (0–4) from **big** ones (5–9).
   they pull back partway and regrow nearby, avoiding the old partner.
 
 The full rules, parameters and the meaning of every color are in
-**[docs/neurons.md](docs/neurons.md)**. It currently reaches about 72% accuracy
+**[docs/neurons.md](docs/neurons.md)**. It currently reaches about 70% accuracy
 (chance is 50%).
 
 Drag with a mouse or finger to rotate the cube, and pinch or scroll to zoom.

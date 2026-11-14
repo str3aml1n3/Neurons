@@ -64,12 +64,13 @@ export const PARAMS = {
   scalingTotal: 0, // input budget per neuron: 0 = keep the average input at initialWeight, > 0 = fixed total
   timingCredit: 0, // 0 = flat credit; else credit = timingCredit^(ticks between arrival and firing)
   retryWrong: true, // after a wrong answer, show the same digit again
-  // Connector lifecycle (off by default):
-  eliminateAfter: 0, // remove a connector after this many failures in a row (0 = never)
+  // Connector lifecycle:
+  eliminateAfter: 3, // remove a connector after this many failures in a row (0 = never)
   sproutChance: 0, // per-tick chance an active neuron below its maximum grows a new connector
   sproutActivity: 1, // activity a neuron needs before it can sprout
   activityDecay: 0.999, // activity kept per tick (halves in about 700 ticks)
   startMinimal: false, // neurons are born with 1 axon and 1 dendrite
+  coactivityGain: 0, // "fire together, wire together": bias toward co-active partners (0 = off)
   reward: 0.2,
   punish: 0.2,
   pause: 12,
@@ -284,8 +285,25 @@ export class Brain {
     const inhibitoryAxon = connector.type === 'axon' && connector.owner.inhibitory;
     const towardNeuron = connector.owner.kind !== 'neuron' || inhibitoryAxon
       || (others.length && this.random() < 0.5);
-    if (towardNeuron && others.length) connector.goal = this.pick(others).soma;
+    if (towardNeuron && others.length) connector.goal = this.pickPartner(connector, others, inhibitoryAxon).soma;
     else connector.goal = connector.type === 'axon' ? this.pick(this.outputCells) : this.pick(this.segmentCells);
+  }
+
+  // "Fire together, wire together": an excitatory connector prefers partners
+  // that were active alongside its owner in recent correct answers. Weight =
+  // 1 + gain × activity(owner) × activity(partner); with gain 0 (or for an
+  // inhibitory axon) every partner is equally likely.
+  pickPartner(connector, others, inhibitoryAxon) {
+    const gain = this.p.coactivityGain;
+    if (!gain || inhibitoryAxon) return this.pick(others);
+    const mine = connector.owner.activity;
+    const weights = others.map((n) => 1 + gain * mine * n.activity);
+    let r = this.random() * weights.reduce((a, w) => a + w, 0);
+    for (let i = 0; i < others.length; i += 1) {
+      r -= weights[i];
+      if (r <= 0) return others[i];
+    }
+    return others.at(-1);
   }
 
   // A goal near the connector's tip or, with clustering, near the owner's
@@ -329,7 +347,6 @@ export class Brain {
   // An active neuron below its maximum grows a new dendrite or axon.
   sprout() {
     this.neurons.forEach((neuron) => {
-      neuron.activity *= this.p.activityDecay;
       if (neuron.activity < this.p.sproutActivity || this.random() >= this.p.sproutChance) return;
       const room = [];
       if (neuron.dendrites.length < this.p.maxDendrites) room.push('dendrite');
@@ -572,6 +589,7 @@ export class Brain {
     if (this.tick % 50 === 0) {
       this.synapses.filter((s) => s.trophic < this.p.trophicFloor).forEach((s) => this.removeSynapse(s, 'unsupported'));
     }
+    this.nodes.forEach((node) => { node.activity *= this.p.activityDecay; });
     if (this.p.sproutChance) this.sprout();
     [...this.connectors].forEach((c) => {
       if (c.state === 'retracting') this.retract(c);
@@ -792,7 +810,7 @@ export class Brain {
     this.lastEligible = new Set([...behindAnswer, ...helpfulChain]);
     if (correct) {
       this.lastEligible.forEach((syn) => {
-        [syn.from, syn.to].forEach((node) => { if (node.kind === 'neuron') node.activity += 1; });
+        [syn.from, syn.to].forEach((node) => { node.activity += 1; });
       });
     }
     let strengthened = 0;

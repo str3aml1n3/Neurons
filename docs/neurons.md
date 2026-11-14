@@ -236,11 +236,21 @@ Because each receiver shares a fixed amount, its inputs compete for it.
 A connector that retracts completely (its path was shorter than 5 cells) or
 that gave up while growing starts over from its body with a new guided goal.
 
+**Elimination.** Each connector counts its failures in a row (prunes and
+give-ups); earning trophic support resets the count. After **3 failures** it
+retracts completely and is **removed**. A neuron always keeps at least one
+dendrite and one axon. So neurons lose connectors that never earn their keep:
+they settle at about one dendrite and one axon, with a third fewer synapses
+and the same accuracy (see
+[Connector lifecycle experiments](#connector-lifecycle-experiments)).
+
 ## How well it learns
 
 The headless test (`node tests/brain.test.mjs`) runs 5 random networks for
 30,000 ticks each. Over each run's last 300 answers, accuracy averages about
-**72%** (chance is 50%). It learns, but only modestly.
+**69%** (chance is 50%). It learns, but only modestly. Results vary a lot
+between networks: averages over 10 networks still move by 3–4 points from one
+set of networks to another, so the experiments below use two or three sets.
 
 Over 10 networks and 40,000 ticks, the regrowth rules (partial retraction,
 avoiding pruned partners, local and clustered regrowth, trophic competition)
@@ -330,9 +340,10 @@ often and would otherwise distort the comparison.
 
 ### Connector lifecycle experiments
 
-Normally a neuron keeps the number of dendrites and axons it was born with: a
-pruned connector always regrows. Two optional rules, **off by default**, let
-the count change during the neuron's life:
+Originally a neuron kept the number of dendrites and axons it was born with: a
+pruned connector always regrew. Two rules let the count change during the
+neuron's life. Elimination is **on by default** (after 3 failures); sprouting
+is off:
 
 - **Elimination** (\`eliminateAfter\`): a connector counts its failures (prunes
   and give-ups) in a row; earning trophic support resets the count. After this
@@ -361,6 +372,37 @@ the count change during the neuron's life:
   network. New connectors grow toward random goals, mostly fail and are
   removed, and the still-active neuron sprouts again. Sprouting would need
   guidance, for example toward co-active neurons, to be useful.
+
+### "Fire together, wire together" experiments
+
+With \`coactivityGain\` above 0 (off by default), an excitatory connector
+choosing a neuron to grow toward prefers partners that were active alongside
+its owner in recent correct answers: the chance of each partner is weighted by
+1 + gain × activity(owner) × activity(partner). Activity counts for digit
+channels and output cells as well as neurons. Inhibitory axons still choose at
+random. These runs all have elimination on.
+
+| Setting | Networks 1–10 | Networks 11–20 | Combination neurons |
+| --- | --- | --- | --- |
+| Baseline | 74.0% | 75.1% | ~1.8 |
+| Co-activity 2 / 10 / 50 | 75.5 / 68.1 / 73.0% | 73.6% (gain 2) | 1.3–2.2 |
+| Co-activity 10 + sprouting | 73.3% | 70.1% | **~8** |
+| Weak new synapses (0.6 or 0.75), with or without the above | 71.6–72.5% | — | 1.2–8.4 |
+| Sparser firing (threshold target 1 per 30–120 ticks instead of 1 per 20) | 71.1–77.2% | 69.7–70.2% | 1.4–8.4 |
+
+*Combination neurons* are neurons wired directly to two or more different digit
+channels.
+
+- **Guidance builds the right wiring.** With sprouting, combination neurons
+  rise from about 2 to about 8 per network.
+- **But they behave as OR, not AND.** They fire for 8.4–8.7 of the 10 digits
+  on average (57–60% fire for nine or ten), so they carry little information.
+  New synapses start at weight 1, the firing threshold, so any single input
+  fires the neuron.
+- **Neither weaker new synapses nor sparser firing fixed that.** Sparse firing
+  at 1 per 40 ticks scored 77.2% on the first set of networks, then 69.7% and
+  73.6% on two more: noise. No setting in this family beat the baseline
+  consistently.
 
 ## What you see
 
@@ -438,9 +480,10 @@ All values live in `PARAMS` in [`web/brain.js`](../web/brain.js).
 | `scalingTotal` | 0 | Experimental: input budget per neuron (0 = keep the average at `initialWeight`) |
 | `timingCredit` | 0 (off) | Experimental: credit factor per tick between a signal's arrival and the firing |
 | `retryWrong` | true | Show the same digit again after a wrong answer |
-| `eliminateAfter` | 0 (off) | Lifecycle: remove a connector after this many failures in a row |
+| `eliminateAfter` | 3 | Lifecycle: remove a connector after this many failures in a row (0 = never) |
 | `sproutChance` | 0 (off) | Lifecycle: per-tick chance an active neuron below its maximum grows a new connector |
 | `sproutActivity` | 1 | Lifecycle: activity a neuron needs before it can sprout |
 | `activityDecay` | 0.999 | Lifecycle: share of activity kept per tick |
 | `startMinimal` | false | Lifecycle: neurons start with one axon and one dendrite |
+| `coactivityGain` | 0 (off) | Experimental: "fire together, wire together" bias toward co-active partners |
 | `pause` | 12 | Ticks between trials |
