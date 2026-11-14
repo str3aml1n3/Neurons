@@ -31,7 +31,7 @@ class Brain {
         const target = layerIndex < 2 ? this.layers[layerIndex + 1][(index + branch * 3) % 7] : null;
         const destination = target ? target.soma : { x: branch === 0 ? 1 : 7, y: 4, z: SIZE - 1 };
         source.edges.push({
-          target, destination, axon: [source.soma], weight: 1, curveSeed: this.edgeSequence++,
+          source, target, destination, axon: [source.soma], weight: 1, curveSeed: this.edgeSequence++,
         });
       }
     }));
@@ -226,24 +226,31 @@ for (let x = 0; x < SIZE; x += 1) {
 
 const neuronGroup = new THREE.Group();
 cube.add(neuronGroup);
+const sensoryGroup = new THREE.Group();
+cube.add(sensoryGroup);
 const somaGeometry = new THREE.SphereGeometry(0.16, 16, 12);
 const layerStyles = [
   { soma: 0x63e9dc, emissive: 0x117d85, line: 0x4bc9dc },
   { soma: 0xaa8cff, emissive: 0x51349e, line: 0x9578e8 },
   { soma: 0xff83bf, emissive: 0x9c245d, line: 0xea619f },
 ];
-const signalMesh = new THREE.Mesh(
-  new THREE.SphereGeometry(0.27, 16, 12),
-  new THREE.MeshStandardMaterial({ color: 0xfff267, emissive: 0xffcc24, emissiveIntensity: 2 }),
-);
-signalMesh.visible = false;
-cube.add(signalMesh);
+const signalGroup = new THREE.Group();
+const signalAura = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial({
+  color: 0xffa229, transparent: true, opacity: 0.22, depthWrite: false,
+}));
+const signalCore = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial({
+  color: 0xfff4a8, transparent: true, opacity: 0.95, depthWrite: false,
+}));
+signalGroup.add(signalAura, signalCore);
+signalGroup.visible = false;
+cube.add(signalGroup);
 
 let brain = new Brain();
 const visuals = new Map();
+let sensoryLinks = [];
+let lastSignalDraw = 0;
 
-function organicPoints(points, seed) {
-  const anchors = points.map(pointToVector);
+function curveFromVectors(anchors, seed) {
   if (anchors.length < 2) return anchors;
   const offset = (index) => new THREE.Vector3(
     Math.sin(seed * 4.17 + index * 1.71),
@@ -253,18 +260,32 @@ function organicPoints(points, seed) {
   const controls = anchors.map((point, index) => (
     index === 0 || index === anchors.length - 1 ? point : point.clone().add(offset(index))
   ));
-  return new THREE.CatmullRomCurve3(controls, false, 'centripetal').getPoints(
-    Math.max(8, controls.length * 5),
-  );
+  return new THREE.CatmullRomCurve3(controls, false, 'centripetal');
 }
 
-function lineFrom(points, color, opacity = 0.8, seed = 0) {
-  const material = new THREE.LineBasicMaterial({
+function tubeFromVectors(points, color, radius, opacity, seed) {
+  const curve = curveFromVectors(points, seed);
+  const geometry = Array.isArray(curve)
+    ? new THREE.BufferGeometry()
+    : new THREE.TubeGeometry(curve, Math.max(8, points.length * 5), radius, 6, false);
+  const material = new THREE.MeshBasicMaterial({
     color, transparent: true, opacity, depthWrite: false,
   });
-  const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(organicPoints(points, seed)), material);
-  line.userData.seed = seed;
-  return line;
+  const tube = new THREE.Mesh(geometry, material);
+  tube.userData = { seed, radius };
+  return tube;
+}
+
+function tubeFromGridPoints(points, color, radius, opacity, seed) {
+  return tubeFromVectors(points.map(pointToVector), color, radius, opacity, seed);
+}
+
+function updateTube(tube, points) {
+  tube.geometry.dispose();
+  const curve = curveFromVectors(points.map(pointToVector), tube.userData.seed);
+  tube.geometry = Array.isArray(curve)
+    ? new THREE.BufferGeometry()
+    : new THREE.TubeGeometry(curve, Math.max(8, points.length * 5), tube.userData.radius, 6, false);
 }
 
 function createVisuals() {
@@ -277,39 +298,88 @@ function createVisuals() {
     }));
     soma.position.copy(pointToVector(neuron.soma));
     neuronGroup.add(soma);
-    const dendrite = lineFrom(neuron.dendrite, style.line, 0.72, 100 + neuronIndex);
+    const dendrite = tubeFromGridPoints(neuron.dendrite, style.line, 0.025, 0.72, 100 + neuronIndex);
     neuronGroup.add(dendrite);
     const edges = neuron.edges.map((edge) => {
-      const line = lineFrom(edge.axon, style.line, 0.95, edge.curveSeed);
-      neuronGroup.add(line);
-      return line;
+      const tube = tubeFromGridPoints(edge.axon, style.line, 0.06, 0.95, edge.curveSeed);
+      neuronGroup.add(tube);
+      return tube;
     });
     visuals.set(neuron, { dendrite, edges });
   });
 }
 
-function updateLine(line, points) {
-  line.geometry.dispose();
-  line.geometry = new THREE.BufferGeometry().setFromPoints(organicPoints(points, line.userData.seed));
+function createSensoryLinks() {
+  sensoryGroup.clear();
+  sensoryLinks = digitCells.map(({ cell, segment }, index) => {
+    const source = brain.layers[0][segment];
+    const tube = tubeFromVectors(
+      [cell.position.clone(), pointToVector(source.soma)],
+      0xffdb72,
+      0.045,
+      0.45,
+      200 + index,
+    );
+    sensoryGroup.add(tube);
+    return { cell, segment, source, tube };
+  });
 }
 
 function syncVisuals() {
-  digitCells.forEach(({ cell, segment }) => {
-    const lit = (DIGITS[brain.digit] & (1 << segment)) !== 0;
-    cell.material.emissiveIntensity = lit ? 1.6 : 0.03;
-    cell.material.color.setHex(lit ? 0xffc64b : 0x473b22);
-  });
   brain.neurons.forEach((neuron) => {
     const visual = visuals.get(neuron);
-    updateLine(visual.dendrite, neuron.dendrite);
-    neuron.edges.forEach((edge, index) => updateLine(visual.edges[index], edge.axon));
+    updateTube(visual.dendrite, neuron.dendrite);
+    neuron.edges.forEach((edge, index) => updateTube(visual.edges[index], edge.axon));
   });
-  const signal = brain.signalPoint();
-  signalMesh.visible = Boolean(signal);
-  if (signal) signalMesh.position.copy(pointToVector(signal));
   digitElement.textContent = brain.digit;
   statusElement.textContent = brain.dopamine > 0.1 ? `${brain.status}  DOPAMINE` : brain.status;
   scoreElement.textContent = `Rewards: ${brain.rewards} / ${brain.attempts}`;
+}
+
+function updateSensoryActivation(time) {
+  const phase = time * 0.008;
+  digitCells.forEach(({ cell, segment }) => {
+    const lit = (DIGITS[brain.digit] & (1 << segment)) !== 0;
+    const pulse = 0.5 + 0.5 * Math.sin(phase + segment * 0.8);
+    cell.material.emissiveIntensity = lit ? 1.3 + pulse * 1.2 : 0.03;
+    cell.material.color.setHex(lit ? 0xffc64b : 0x473b22);
+  });
+  sensoryLinks.forEach((link, index) => {
+    const lit = (DIGITS[brain.digit] & (1 << link.segment)) !== 0;
+    const selected = brain.signal && brain.signal.source === link.source;
+    link.tube.visible = lit;
+    link.tube.material.opacity = selected ? 0.95 : 0.22 + 0.35 * (0.5 + 0.5 * Math.sin(phase + index));
+  });
+}
+
+function updateSignalFlow(time) {
+  if (!brain.signal || brain.signal.axon.length < 2) {
+    signalGroup.visible = false;
+    return;
+  }
+  if (time - lastSignalDraw < 40) {
+    return;
+  }
+  lastSignalDraw = time;
+  const curve = curveFromVectors(brain.signal.axon.map(pointToVector), brain.signal.curveSeed);
+  if (Array.isArray(curve)) return;
+  const stepProgress = Math.min(1, (time - lastStep) / 100);
+  const progress = Math.min(1, (brain.signalIndex + stepProgress) / (brain.signal.axon.length - 1));
+  const start = Math.max(0, progress - 0.35);
+  const points = Array.from({ length: 14 }, (_, index) => (
+    curve.getPointAt(start + ((progress - start) * index) / 13)
+  ));
+  [signalAura, signalCore].forEach((mesh, index) => {
+    mesh.geometry.dispose();
+    mesh.geometry = new THREE.TubeGeometry(
+      new THREE.CatmullRomCurve3(points, false, 'centripetal'),
+      24,
+      index === 0 ? 0.14 : 0.065,
+      6,
+      false,
+    );
+  });
+  signalGroup.visible = true;
 }
 
 function resize() {
@@ -327,6 +397,8 @@ function animate(time) {
     syncVisuals();
     lastStep = time;
   }
+  updateSensoryActivation(time);
+  updateSignalFlow(time);
   controls.update();
   renderer.render(scene, camera);
 }
@@ -334,8 +406,10 @@ function animate(time) {
 document.querySelector('#reset').addEventListener('click', () => {
   brain = new Brain();
   createVisuals();
+  createSensoryLinks();
   syncVisuals();
 });
 
 createVisuals();
+createSensoryLinks();
 syncVisuals();
