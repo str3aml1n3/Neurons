@@ -89,43 +89,118 @@ function glowTexture() {
 }
 const glow = glowTexture();
 
-// Input and output cells are whole cubes inside the grid's front and back layers.
+// Every kind of object is drawn as one instanced mesh (one draw call), so the
+// scene costs about a dozen draw calls however much the network grows.
+const dummy = new THREE.Object3D();
+const tint = new THREE.Color();
+const white = new THREE.Color(0xffffff);
+const AXIS_ROTATION = {
+  x: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI / 2),
+  y: new THREE.Quaternion(),
+  z: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2),
+};
+
+function instanced(geometry, material, capacity) {
+  const mesh = new THREE.InstancedMesh(geometry, material, capacity);
+  mesh.setColorAt(0, white); // create the color buffer up front
+  mesh.count = 0;
+  mesh.frustumCulled = false;
+  cube.add(mesh);
+  return mesh;
+}
+
+function place(mesh, index, position, scale, rotation = AXIS_ROTATION.y) {
+  dummy.position.copy(position);
+  dummy.quaternion.copy(rotation);
+  if (typeof scale === 'number') dummy.scale.setScalar(scale);
+  else dummy.scale.copy(scale);
+  dummy.updateMatrix();
+  mesh.setMatrixAt(index, dummy.matrix);
+}
+
+function finish(mesh, count) {
+  mesh.count = count;
+  mesh.instanceMatrix.needsUpdate = true;
+  mesh.instanceColor.needsUpdate = true;
+}
+
+// Input and output cells are whole cubes inside the grid's front and back
+// layers. Digit cells are split by how visible they should be right now.
 const ioGeometry = new THREE.BoxGeometry(0.78, 0.78, 0.78);
-const digitCells = SEGMENT_CELLS.map((cell) => {
-  const mesh = new THREE.Mesh(ioGeometry, new THREE.MeshStandardMaterial({
-    color: COLORS.gold, emissive: 0xa96400, transparent: true, opacity: 0.92,
-  }));
-  mesh.position.copy(cellToVector(cell));
-  cube.add(mesh);
-  return { cell, mesh };
-});
-const outputCells = Array.from({ length: SIZE }, (_, x) => {
-  const color = x < 4 ? COLORS.small : x > 4 ? COLORS.big : COLORS.neutral;
-  const mesh = new THREE.Mesh(ioGeometry, new THREE.MeshStandardMaterial({
-    color, emissive: color, emissiveIntensity: 0.35, transparent: true, opacity: 0.92,
-  }));
-  mesh.position.copy(cellToVector({ x, y: 4, z: SIZE - 1 }));
-  cube.add(mesh);
-  return { x, mesh };
-});
+const digitCells = SEGMENT_CELLS.map((cell) => ({ cell, position: cellToVector(cell) }));
+const digitLit = instanced(ioGeometry, new THREE.MeshLambertMaterial({
+  emissive: 0xa96400, emissiveIntensity: 0.6, transparent: true, opacity: 0.92,
+}), digitCells.length);
+const digitDark = instanced(ioGeometry, new THREE.MeshLambertMaterial({
+  color: COLORS.darkCell, emissive: COLORS.dark, emissiveIntensity: 0.5, transparent: true, opacity: 0.5,
+  depthWrite: false,
+}), digitCells.length);
+const digitFaint = instanced(ioGeometry, new THREE.MeshBasicMaterial({
+  transparent: true, opacity: 0.1, depthWrite: false,
+}), digitCells.length);
+const outputCells = Array.from({ length: SIZE }, (_, x) => ({
+  x,
+  position: cellToVector({ x, y: 4, z: SIZE - 1 }),
+  color: new THREE.Color(x < 4 ? COLORS.small : x > 4 ? COLORS.big : COLORS.neutral),
+}));
+const outputMesh = instanced(ioGeometry, new THREE.MeshLambertMaterial({
+  transparent: true, opacity: 0.92,
+}), SIZE);
+outputCells.forEach(({ position }, i) => place(outputMesh, i, position, 1));
+finish(outputMesh, SIZE);
 
 // Faint tinted cube on every cell a connector occupies.
-const occupancy = new THREE.InstancedMesh(
-  new THREE.BoxGeometry(0.94, 0.94, 0.94),
-  new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.06, depthWrite: false }),
-  SIZE ** 3,
-);
-occupancy.setColorAt(0, new THREE.Color(COLORS.dendrite)); // create the color buffer up front
-occupancy.count = 0;
-cube.add(occupancy);
+const occupancy = instanced(new THREE.BoxGeometry(0.94, 0.94, 0.94), new THREE.MeshBasicMaterial({
+  transparent: true, opacity: 0.06, depthWrite: false,
+}), SIZE ** 3);
 
-const neuronGroup = new THREE.Group();
-const connectorGroup = new THREE.Group();
-const synapseGroup = new THREE.Group();
-cube.add(connectorGroup, synapseGroup, neuronGroup);
+// Connectors: every step is one cell along one axis, so each is drawn as a
+// unit cylinder, with a small sphere at every cell to round the corners.
+const MAX_SEGMENTS = 3000;
+// Unlit: the tubes are thin enough that shading adds nothing, and flat color
+// keeps axons and dendrites their true legend colors.
+const connectorMaterial = new THREE.MeshBasicMaterial();
+const segmentMesh = instanced(new THREE.CylinderGeometry(1, 1, 1, 8, 1, true), connectorMaterial, MAX_SEGMENTS);
+const jointMesh = instanced(new THREE.SphereGeometry(1, 8, 6), connectorMaterial, MAX_SEGMENTS);
+const STATE_BRIGHTNESS = { growing: 0.6, connected: 1, retracting: 0.3 };
 
-const somaGeometry = new THREE.SphereGeometry(0.34, 20, 14);
-const synapseGeometry = new THREE.BoxGeometry(0.36, 0.36, 0.36);
+// Neuron bodies, and their halos as one layer of glowing points with a size
+// and color per neuron.
+const somaMesh = instanced(new THREE.SphereGeometry(0.34, 20, 14), new THREE.MeshStandardMaterial({
+  color: COLORS.neuron, emissive: COLORS.neuron, emissiveIntensity: 0.25, roughness: 0.35,
+}), 64);
+const haloGeometry = new THREE.BufferGeometry();
+const haloMaterial = new THREE.ShaderMaterial({
+  uniforms: { map: { value: glow }, scale: { value: 400 } },
+  vertexShader: `
+    attribute float size;
+    attribute vec3 haloColor;
+    uniform float scale;
+    varying vec3 vColor;
+    void main() {
+      vColor = haloColor;
+      vec4 viewPosition = modelViewMatrix * vec4(position, 1.0);
+      gl_PointSize = size * scale / -viewPosition.z;
+      gl_Position = projectionMatrix * viewPosition;
+    }`,
+  fragmentShader: `
+    uniform sampler2D map;
+    varying vec3 vColor;
+    void main() {
+      gl_FragColor = vec4(vColor * texture2D(map, gl_PointCoord).a, 1.0);
+    }`,
+  transparent: true,
+  depthWrite: false,
+  blending: THREE.AdditiveBlending,
+});
+const halos = new THREE.Points(haloGeometry, haloMaterial);
+halos.frustumCulled = false;
+cube.add(halos);
+const HALO_SIZE = 1 / Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2); // world units -> point size
+
+const synapseMesh = instanced(new THREE.BoxGeometry(0.36, 0.36, 0.36), new THREE.MeshLambertMaterial({
+  emissive: COLORS.synapse, emissiveIntensity: 0.25,
+}), 400);
 
 // Signals: glowing points drawn over everything, with a short fading trail.
 const MAX_SPIKES = 600;
@@ -140,14 +215,14 @@ glowGeometry.setAttribute('color', new THREE.BufferAttribute(glowColors, 3));
 const coreGeometry = new THREE.BufferGeometry();
 coreGeometry.setAttribute('position', new THREE.BufferAttribute(corePositions, 3));
 coreGeometry.setAttribute('color', new THREE.BufferAttribute(coreColors, 3));
-const pointMaterial = (color, size, vertexColors) => new THREE.PointsMaterial({
-  color, size, map: glow, vertexColors, transparent: true, depthTest: false, depthWrite: false,
+const pointMaterial = (size) => new THREE.PointsMaterial({
+  size, map: glow, vertexColors: true, transparent: true, depthTest: false, depthWrite: false,
   blending: THREE.AdditiveBlending,
 });
-const spikeGlow = new THREE.Points(glowGeometry, pointMaterial(0xffffff, 1.3, true));
-const spikeCore = new THREE.Points(coreGeometry, pointMaterial(0xffffff, 0.5, true));
+const spikeGlow = new THREE.Points(glowGeometry, pointMaterial(1.3));
+const spikeCore = new THREE.Points(coreGeometry, pointMaterial(0.5));
 const glowTint = { lit: new THREE.Color(COLORS.spikeGlow), dark: new THREE.Color(COLORS.dark) };
-const coreTint = { lit: new THREE.Color(COLORS.spike), dark: new THREE.Color(COLORS.dark).lerp(new THREE.Color(0xffffff), 0.5) };
+const coreTint = { lit: new THREE.Color(COLORS.spike), dark: new THREE.Color(COLORS.dark).lerp(white, 0.5) };
 spikeGlow.renderOrder = 10;
 spikeCore.renderOrder = 11;
 spikeGlow.frustumCulled = false;
@@ -155,17 +230,20 @@ spikeCore.frustumCulled = false;
 cube.add(spikeGlow, spikeCore);
 
 let brain = new Brain();
-let somas = new Map(); // neuron -> { body, halo }
-let tubes = new Map(); // connector -> mesh
-let synapseMeshes = new Map(); // synapse -> mesh
+let haloSizes = new Float32Array(0);
+let haloColors = new Float32Array(0);
 
-// A connector is drawn as straight tube segments through cell centers.
-function connectorGeometry(connector, radius) {
-  const points = [connector.owner.soma, ...connector.cells].map(cellToVector);
-  if (points.length < 2) return new THREE.BufferGeometry();
-  const path = new THREE.CurvePath();
-  for (let i = 1; i < points.length; i += 1) path.add(new THREE.LineCurve3(points[i - 1], points[i]));
-  return new THREE.TubeGeometry(path, (points.length - 1) * 4, radius, 6, false);
+function createScene() {
+  const count = brain.neurons.length;
+  brain.neurons.forEach((neuron, i) => place(somaMesh, i, cellToVector(neuron.soma), 1));
+  finish(somaMesh, count);
+  const positions = new Float32Array(count * 3);
+  brain.neurons.forEach((neuron, i) => cellToVector(neuron.soma).toArray(positions, i * 3));
+  haloSizes = new Float32Array(count);
+  haloColors = new Float32Array(count * 3);
+  haloGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  haloGeometry.setAttribute('size', new THREE.BufferAttribute(haloSizes, 1));
+  haloGeometry.setAttribute('haloColor', new THREE.BufferAttribute(haloColors, 3));
 }
 
 function connectorRadius(connector) {
@@ -174,96 +252,48 @@ function connectorRadius(connector) {
   return base * 0.7 + 0.06 * (connector.synapse.weight / brain.p.maxWeight);
 }
 
-// Rebuilding a TubeGeometry uploads new GPU buffers, so only do it when the
-// connector's cells or thickness changed.
-function updateTube(connector) {
-  const mesh = tubes.get(connector);
-  const radius = connectorRadius(connector);
-  const last = connector.cells.at(-1);
-  const data = mesh.userData;
-  if (data.length !== connector.cells.length || data.last !== last || data.radius !== radius) {
-    data.length = connector.cells.length;
-    data.last = last;
-    data.radius = radius;
-    mesh.geometry.dispose();
-    mesh.geometry = connectorGeometry(connector, radius);
-  }
-  const opacity = { growing: 0.6, connected: 0.95, retracting: 0.25 }[connector.state];
-  mesh.material.opacity = opacity;
-}
-
-function createScene() {
-  [neuronGroup, connectorGroup, synapseGroup].forEach((group) => {
-    group.children.forEach((child) => {
-      if (child.geometry !== somaGeometry && child.geometry !== synapseGeometry) child.geometry?.dispose();
-      child.material?.dispose();
-    });
-    group.clear();
-  });
-  somas = new Map();
-  tubes = new Map();
-  synapseMeshes = new Map();
-  brain.neurons.forEach((neuron) => {
-    const body = new THREE.Mesh(somaGeometry, new THREE.MeshStandardMaterial({
-      color: COLORS.neuron, emissive: COLORS.neuron, emissiveIntensity: 0.25, roughness: 0.35,
-    }));
-    body.position.copy(cellToVector(neuron.soma));
-    const halo = new THREE.Sprite(new THREE.SpriteMaterial({
-      map: glow, color: COLORS.dendrite, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
-    }));
-    halo.position.copy(body.position);
-    neuronGroup.add(body, halo);
-    somas.set(neuron, { body, halo });
-  });
+const from = new THREE.Vector3();
+const to = new THREE.Vector3();
+const middle = new THREE.Vector3();
+const segmentScale = new THREE.Vector3();
+function updateConnectors() {
+  let segments = 0;
+  let joints = 0;
   brain.connectors.forEach((connector) => {
-    const mesh = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshStandardMaterial({
-      color: COLORS[connector.type],
-      emissive: COLORS[connector.type],
-      emissiveIntensity: 0.45,
-      transparent: true,
-      depthWrite: false,
-    }));
-    mesh.userData = { length: -1, last: null, radius: 0 };
-    connectorGroup.add(mesh);
-    tubes.set(connector, mesh);
+    if (!connector.cells.length) return;
+    const radius = connectorRadius(connector);
+    tint.setHex(COLORS[connector.type]).multiplyScalar(STATE_BRIGHTNESS[connector.state]);
+    segmentScale.set(radius, 1, radius);
+    let previous = connector.owner.soma;
+    connector.cells.forEach((cell) => {
+      if (segments >= MAX_SEGMENTS) return;
+      from.copy(cellToVector(previous));
+      to.copy(cellToVector(cell));
+      const axis = previous.x !== cell.x ? 'x' : previous.y !== cell.y ? 'y' : 'z';
+      place(segmentMesh, segments, middle.addVectors(from, to).multiplyScalar(0.5), segmentScale, AXIS_ROTATION[axis]);
+      segmentMesh.setColorAt(segments, tint);
+      segments += 1;
+      place(jointMesh, joints, to, radius);
+      jointMesh.setColorAt(joints, tint);
+      joints += 1;
+      previous = cell;
+    });
   });
+  finish(segmentMesh, segments);
+  finish(jointMesh, joints);
 }
 
-const matrix = new THREE.Matrix4();
-const tint = new THREE.Color();
 function updateOccupancy() {
   let count = 0;
   brain.connectors.forEach((connector) => {
     tint.setHex(COLORS[connector.type]);
     connector.cells.forEach((cell) => {
-      const { x, y, z } = cellToVector(cell);
-      occupancy.setMatrixAt(count, matrix.makeTranslation(x, y, z));
+      place(occupancy, count, cellToVector(cell), 1);
       occupancy.setColorAt(count, tint);
       count += 1;
     });
   });
-  occupancy.count = count;
-  occupancy.instanceMatrix.needsUpdate = true;
-  if (occupancy.instanceColor) occupancy.instanceColor.needsUpdate = true;
-}
-
-function updateSynapses() {
-  const alive = new Set(brain.synapses);
-  synapseMeshes.forEach((mesh, synapse) => {
-    if (alive.has(synapse)) return;
-    synapseGroup.remove(mesh);
-    mesh.material.dispose();
-    synapseMeshes.delete(synapse);
-  });
-  brain.synapses.forEach((synapse) => {
-    if (synapseMeshes.has(synapse)) return;
-    const mesh = new THREE.Mesh(synapseGeometry, new THREE.MeshStandardMaterial({
-      color: COLORS.synapse, emissive: COLORS.synapse, emissiveIntensity: 0.6,
-    }));
-    mesh.position.copy(cellToVector(synapse.cell));
-    synapseGroup.add(mesh);
-    synapseMeshes.set(synapse, mesh);
-  });
+  finish(occupancy, count);
 }
 
 function updateHud() {
@@ -279,10 +309,10 @@ function updateHud() {
   synapseElement.textContent = `Synapses ${brain.synapses.length}`;
 }
 
+// Runs once per simulation step.
 function syncScene() {
-  brain.connectors.forEach(updateTube);
+  updateConnectors();
   updateOccupancy();
-  updateSynapses();
   updateHud();
 }
 
@@ -298,77 +328,117 @@ function pointOnPath(path, t, target) {
 
 const spot = new THREE.Vector3();
 function updateSpikes(frac) {
-  const spikes = brain.spikes.slice(0, MAX_SPIKES);
-  spikes.forEach((spike, s) => {
+  const count = Math.min(brain.spikes.length, MAX_SPIKES);
+  for (let s = 0; s < count; s += 1) {
+    const spike = brain.spikes[s];
     const head = spike.index + frac;
     // Dark-channel signals are violet until they reach the first neuron;
     // whatever a neuron fires is its own (gold) signal.
     const kind = spike.synapse.from.channel === 'dark' ? 'dark' : 'lit';
-    TRAIL.forEach((back, k) => {
-      const p = pointOnPath(spike.path, head - back, spot);
+    const g = glowTint[kind];
+    for (let k = 0; k < TRAIL.length; k += 1) {
+      const p = pointOnPath(spike.path, head - TRAIL[k], spot);
       const i = (s * TRAIL.length + k) * 3;
-      glowPositions.set([p.x, p.y, p.z], i);
       const fade = 1 - k / TRAIL.length;
-      const g = glowTint[kind];
-      glowColors.set([g.r * fade, g.g * fade, g.b * fade], i);
+      glowPositions[i] = p.x;
+      glowPositions[i + 1] = p.y;
+      glowPositions[i + 2] = p.z;
+      glowColors[i] = g.r * fade;
+      glowColors[i + 1] = g.g * fade;
+      glowColors[i + 2] = g.b * fade;
       if (k === 0) {
-        corePositions.set([p.x, p.y, p.z], s * 3);
-        coreColors.set([coreTint[kind].r, coreTint[kind].g, coreTint[kind].b], s * 3);
+        corePositions[s * 3] = p.x;
+        corePositions[s * 3 + 1] = p.y;
+        corePositions[s * 3 + 2] = p.z;
+        coreTint[kind].toArray(coreColors, s * 3);
       }
-    });
-  });
-  glowGeometry.setDrawRange(0, spikes.length * TRAIL.length);
-  coreGeometry.setDrawRange(0, spikes.length);
+    }
+  }
+  glowGeometry.setDrawRange(0, count * TRAIL.length);
+  coreGeometry.setDrawRange(0, count);
   glowGeometry.attributes.position.needsUpdate = true;
   glowGeometry.attributes.color.needsUpdate = true;
   coreGeometry.attributes.position.needsUpdate = true;
   coreGeometry.attributes.color.needsUpdate = true;
 }
 
+const haloRest = new THREE.Color(COLORS.dendrite);
+const haloFire = new THREE.Color(COLORS.spikeGlow);
+const gold = new THREE.Color(COLORS.gold);
+const dimGold = new THREE.Color(0x6b5a30);
+const darkFaint = new THREE.Color(COLORS.darkCell);
+const lime = new THREE.Color(COLORS.synapse);
+
 // Per-frame glow effects: firing, charge, input and output activity, dopamine.
 function updateGlow(time) {
   const since = (node) => brain.tick - node.lastFired;
-  somas.forEach(({ body, halo }, neuron) => {
+
+  brain.neurons.forEach((neuron, i) => {
     const charge = Math.max(0, Math.min(1, neuron.potential / neuron.threshold));
     const flash = Math.max(0, 1 - since(neuron) / 4);
-    halo.material.color.setHex(flash > 0 ? COLORS.spikeGlow : COLORS.dendrite);
-    halo.material.opacity = 0.35 + charge * 0.4 + flash * 0.6;
-    halo.scale.setScalar(1.1 + charge * 0.5 + flash * 1.4);
-    body.material.emissiveIntensity = 0.25 + charge * 0.5 + flash * 1.5;
+    somaMesh.setColorAt(i, tint.setScalar(0.85 + charge * 0.3 + flash * 0.6));
+    haloSizes[i] = (1.1 + charge * 0.5 + flash * 1.4) * HALO_SIZE;
+    tint.copy(flash > 0 ? haloFire : haloRest).multiplyScalar(0.35 + charge * 0.4 + flash * 0.6);
+    tint.toArray(haloColors, i * 3);
   });
-  digitCells.forEach(({ cell, mesh }) => {
-    // Each cell belongs to one channel. It glows while its channel is active
-    // (gold for lit cells of a lit segment, violet for dark cells of an unlit
-    // one) and stays faint otherwise, so it doesn't hide the network.
+  somaMesh.instanceColor.needsUpdate = true;
+  if (haloGeometry.attributes.size) {
+    haloGeometry.attributes.size.needsUpdate = true;
+    haloGeometry.attributes.haloColor.needsUpdate = true;
+  }
+
+  // Each digit cell belongs to one channel. It glows while its channel is
+  // active (gold for lit cells of a lit segment, violet for dark cells of an
+  // unlit one) and stays faint otherwise, so it doesn't hide the network.
+  let lit = 0;
+  let dark = 0;
+  let faint = 0;
+  digitCells.forEach(({ cell, position }) => {
     const input = brain.cells.get(keyOf(cell)).node;
     const active = brain.active(input);
     const flash = active ? Math.max(0, 1 - since(input) / 3) : 0;
-    const dark = cell.channel === 'dark';
-    mesh.material.color.setHex(dark ? COLORS.darkCell : active ? COLORS.gold : 0x6b5a30);
-    mesh.material.emissive.setHex(dark ? COLORS.dark : 0xa96400);
-    if (active) {
-      mesh.material.opacity = dark ? 0.35 + flash * 0.45 : 0.92;
-      mesh.material.emissiveIntensity = dark ? 0.4 + flash * 1.4 : 0.9 + flash * 1.6;
+    if (active && cell.channel === 'lit') {
+      place(digitLit, lit, position, 1);
+      digitLit.setColorAt(lit, tint.copy(gold).multiplyScalar(1 + flash * 0.8));
+      lit += 1;
+    } else if (active) {
+      place(digitDark, dark, position, 1);
+      digitDark.setColorAt(dark, tint.setScalar(1 + flash * 2));
+      dark += 1;
     } else {
-      mesh.material.opacity = dark ? 0.08 : 0.12;
-      mesh.material.emissiveIntensity = 0.03;
+      place(digitFaint, faint, position, 1);
+      digitFaint.setColorAt(faint, cell.channel === 'dark' ? darkFaint : dimGold);
+      faint += 1;
     }
   });
-  outputCells.forEach(({ x, mesh }) => {
+  finish(digitLit, lit);
+  finish(digitDark, dark);
+  finish(digitFaint, faint);
+
+  outputCells.forEach(({ x, color }, i) => {
     const node = brain.outputs.find((o) => o.x === x);
     const flash = node ? Math.max(0, 1 - since(node) / 5) : 0;
     const chosen = brain.pause > 0 && brain.answer && x !== 4 && (x < 4) === (brain.answer === 'small');
-    mesh.material.emissiveIntensity = 0.35 + flash * 2.5 + (chosen ? 0.9 : 0);
+    outputMesh.setColorAt(i, tint.copy(color).multiplyScalar(0.8 + flash * 1.5 + (chosen ? 0.6 : 0)));
   });
+  outputMesh.instanceColor.needsUpdate = true;
+
+  // Size shows weight; brightness shows trophic support, which fades before a
+  // prune. Synapses credited for a rewarded answer flash on dopamine.
   const rewardGlow = brain.dopamine > 0.05;
-  synapseMeshes.forEach((mesh, synapse) => {
+  const count = Math.min(brain.synapses.length, 400);
+  for (let i = 0; i < count; i += 1) {
+    const synapse = brain.synapses[i];
     const strength = synapse.weight / brain.p.maxWeight;
     const credited = rewardGlow && brain.lastEligible?.has(synapse);
-    // Size shows weight; glow shows trophic support, which fades before a prune.
     const support = Math.min(1, synapse.trophic);
-    mesh.scale.setScalar(0.6 + strength * 0.9 + (credited ? brain.dopamine * 0.8 : 0));
-    mesh.material.emissiveIntensity = 0.1 + support * 1.1 + (credited ? brain.dopamine * 3 : 0);
-  });
+    place(synapseMesh, i, cellToVector(synapse.cell), 0.6 + strength * 0.9 + (credited ? brain.dopamine * 0.8 : 0));
+    tint.copy(lime).multiplyScalar(0.35 + support * 0.8);
+    if (credited) tint.lerp(white, brain.dopamine * 0.8);
+    synapseMesh.setColorAt(i, tint);
+  }
+  finish(synapseMesh, count);
+
   frameMaterial.color.setHex(COLORS.frame).lerp(tint.setHex(COLORS.gold), brain.dopamine);
   frameMaterial.opacity = 0.85 + 0.15 * Math.sin(time * 0.01) * brain.dopamine;
 }
@@ -385,6 +455,7 @@ function fitCamera(aspect) {
   controls.maxDistance = distance * 1.6;
 }
 
+const bufferSize = new THREE.Vector2();
 let lastWidth = 0;
 let lastHeight = 0;
 function resize() {
@@ -394,6 +465,7 @@ function resize() {
   lastWidth = width;
   lastHeight = height;
   renderer.setSize(width, height, false);
+  haloMaterial.uniforms.scale.value = renderer.getDrawingBufferSize(bufferSize).y / 2;
   camera.aspect = width / height;
   camera.updateProjectionMatrix();
   if (Math.abs(camera.aspect - fittedAspect) > 0.15) {
@@ -402,8 +474,35 @@ function resize() {
   }
 }
 
+// Lower the render resolution on devices that can't keep up, and raise it
+// again when there's headroom. Checked every 90 frames.
+const MAX_PIXEL_RATIO = Math.min(window.devicePixelRatio, 2);
+let pixelRatio = MAX_PIXEL_RATIO;
+let frameCount = 0;
+let frameTime = 0;
+let lastFrame = 0;
+function adaptResolution(time) {
+  const delta = time - lastFrame;
+  lastFrame = time;
+  if (delta <= 0 || delta > 250) return; // first frame, or the tab was hidden
+  frameCount += 1;
+  frameTime += delta;
+  if (frameCount < 90) return;
+  const average = frameTime / frameCount;
+  frameCount = 0;
+  frameTime = 0;
+  let next = pixelRatio;
+  if (average > 24) next = Math.max(1, pixelRatio - 0.25); // under ~40 FPS
+  else if (average < 14) next = Math.min(MAX_PIXEL_RATIO, pixelRatio + 0.25);
+  if (next === pixelRatio) return;
+  pixelRatio = next;
+  renderer.setPixelRatio(pixelRatio);
+  lastWidth = 0; // force resize() to apply the new resolution
+}
+
 let lastStep = 0;
 function animate(time) {
+  adaptResolution(time);
   resize();
   if (time - lastStep >= STEP_MS) {
     brain.step();

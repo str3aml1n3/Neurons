@@ -122,6 +122,9 @@ export class Brain {
     this.status = 'Growing connections';
     this.createIONodes();
     this.placeNeurons();
+    // Connector objects are fixed after construction (they retract and regrow
+    // but are never replaced), so the list is built once.
+    this.connectorList = this.nodes.flatMap((n) => [...n.axons, ...n.dendrites]);
     this.digit = this.randInt(10);
     this.startTrial();
   }
@@ -234,7 +237,7 @@ export class Brain {
   }
 
   get connectors() {
-    return this.nodes.flatMap((n) => [...n.axons, ...n.dendrites]);
+    return this.connectorList;
   }
 
   tip(connector) {
@@ -348,6 +351,9 @@ export class Brain {
       c.synapse = synapse;
     });
     if (synapse.axon && synapse.dendrite) this.cells.set(keyOf(synapse.cell), { kind: 'synapse', synapse });
+    // Connected connectors don't move until the synapse is removed, so the
+    // route a spike takes is computed once.
+    synapse.path = this.path(synapse);
     this.synapses.push(synapse);
   }
 
@@ -395,7 +401,7 @@ export class Brain {
   }
 
   emit(synapse) {
-    this.spikes.push({ synapse, path: this.path(synapse), index: 0 });
+    this.spikes.push({ synapse, path: synapse.path, index: 0 });
   }
 
   lit(segment) {

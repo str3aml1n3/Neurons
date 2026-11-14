@@ -47,6 +47,10 @@ browser, including a phone-sized viewport (about 390 × 844).
   `index.html` and to `'./brain.js'` in `app.js` for cache busting. Keep those
   references in exactly that form, don't add versions by hand, and add any new
   local file to that workflow step.
+- Rendering is batched: each kind of object is one `InstancedMesh` (or one
+  `Points` layer), about 13 draw calls in total. Add new object kinds the same
+  way rather than one mesh per object; per-object meshes were the main frame
+  rate cost, especially on phones.
 - Colors carry meaning (see `COLORS` in `app.js` and the variables in
   `styles.css`). Keep the two in sync and don't add decorative color coding.
 - Keep the README's "educational toy, not biologically accurate" framing when
