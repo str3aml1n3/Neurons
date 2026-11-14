@@ -454,9 +454,33 @@ function syncScene() {
 // then the dendrite's curve back to its body. Each cell step is SUBSTEPS
 // points, so a spike at cell index t sits at curve index t * SUBSTEPS.
 const routes = new WeakMap(); // synapse -> points
+// Where an en passant synapse touches: the axon's point (or the digit cell)
+// and the dendrite's point (or the output cell), on the drawn curves.
+function contactEnds(synapse) {
+  const a = synapse.axon
+    ? connectorCurve(synapse.axon)[(synapse.axonIndex + 1) * SUBSTEPS]
+    : cellToVector(synapse.cell);
+  const d = synapse.dendrite
+    ? connectorCurve(synapse.dendrite)[(synapse.dendriteIndex + 1) * SUBSTEPS]
+    : cellToVector(synapse.partnerCell);
+  return { a, d };
+}
+
 function spikeRoute(synapse) {
   let route = routes.get(synapse);
   if (route) return route;
+  if (synapse.contact) {
+    // Along the axon to the contact, across it (two half steps, so a cell
+    // step stays SUBSTEPS points), then along the dendrite to its body.
+    const { a, d } = contactEnds(synapse);
+    const out = synapse.axon ? connectorCurve(synapse.axon).slice(0, (synapse.axonIndex + 1) * SUBSTEPS + 1) : [a];
+    const back = synapse.dendrite
+      ? connectorCurve(synapse.dendrite).slice(0, (synapse.dendriteIndex + 1) * SUBSTEPS + 1).reverse()
+      : [d];
+    route = [...out, a.clone().lerp(d, 0.5), ...back];
+    routes.set(synapse, route);
+    return route;
+  }
   const out = synapse.axon ? connectorCurve(synapse.axon) : [cellToVector(synapse.cell)];
   const back = synapse.dendrite ? [...connectorCurve(synapse.dendrite)].reverse().slice(1) : [];
   route = out.concat(back);
@@ -521,6 +545,7 @@ const dendriteColor = new THREE.Color(COLORS.dendrite);
 const toNeighbour = new THREE.Vector3();
 const partSpot = new THREE.Vector3();
 const partScale = new THREE.Vector3();
+const partMid = new THREE.Vector3();
 const partRotation = new THREE.Quaternion();
 const barDirection = new THREE.Vector3();
 const barSpot = new THREE.Vector3();
@@ -614,9 +639,17 @@ function updateGlow(time) {
     const radius = 0.11 + strength * 0.09 + boost * 0.1;
     const brightness = 0.9 + support * 0.7; // above 1 brightens the part's own colour
     const addPart = (mesh, index, connector, color, size, stretch) => {
-      const route = connectorCurve(connector);
-      const point = route.at(-1);
-      toNeighbour.subVectors(route.at(-2) ?? point, point).normalize();
+      let point;
+      if (synapse.contact) {
+        // En passant: the junction sits between the two touching cells.
+        const ends = contactEnds(synapse);
+        point = partMid.lerpVectors(ends.a, ends.d, 0.5);
+        toNeighbour.subVectors(connector === synapse.axon ? ends.a : ends.d, point).normalize();
+      } else {
+        const route = connectorCurve(connector);
+        point = route.at(-1);
+        toNeighbour.subVectors(route.at(-2) ?? point, point).normalize();
+      }
       partScale.set(size, size * stretch, size);
       place(mesh, index, partSpot.copy(point).addScaledVector(toNeighbour, size * 0.4), partScale,
         partRotation.setFromUnitVectors(up, toNeighbour));

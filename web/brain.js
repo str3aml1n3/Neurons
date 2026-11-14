@@ -84,6 +84,12 @@ export const PARAMS = {
   //   through local interneurons); 'interneurons': each firing inhibitory neuron does
   lateralRadius: 3, // reach in cells (Chebyshev distance); 9 or more covers the cube
   lateralStrength: 0.5, // share of the way to the inhibition floor per hit
+  // En passant synapses (off by default): settled axons also connect where they
+  // run right next to a settled dendrite, a digit cell or an output cell.
+  enPassant: false,
+  enPassantEvery: 10, // ticks between looks for new contacts
+  enPassantChance: 0.02, // chance per neighbouring pair per look
+  maxContacts: 4, // en passant synapses per connector
   reward: 0.2,
   punish: 0.2,
   pause: 12,
@@ -279,6 +285,7 @@ export class Brain {
       owner, type, cells: [], state: 'growing', synapse: null, stuck: 0, steps: 0, goal: null,
       retractLeft: 0, avoid: new Map(), // partner node -> tick until which it is avoided
       failures: 0, // prunes and give-ups in a row without earning support
+      contacts: [], // en passant synapses along this connector
       eliminate: false, // being retracted for good
     };
     this.aim(connector);
@@ -507,12 +514,16 @@ export class Brain {
       weight: this.p.initialWeight, trophic: this.p.trophicStart, delivered: false, lastArrival: -Infinity,
       inhibitory: false, active: false, ...fields,
     };
-    [synapse.axon, synapse.dendrite].forEach((c) => {
-      if (!c) return;
-      c.state = 'connected';
-      c.synapse = synapse;
-    });
-    if (synapse.axon && synapse.dendrite) this.cells.set(keyOf(synapse.cell), { kind: 'synapse', synapse });
+    if (!synapse.contact) {
+      [synapse.axon, synapse.dendrite].forEach((c) => {
+        if (!c) return;
+        c.state = 'connected';
+        c.synapse = synapse;
+      });
+    }
+    if (synapse.axon && synapse.dendrite && !synapse.contact) {
+      this.cells.set(keyOf(synapse.cell), { kind: 'synapse', synapse });
+    }
     this.events.push({ type: 'form', synapse });
     // Connected connectors don't move until the synapse is removed, so the
     // route a spike takes is computed once.
@@ -522,6 +533,14 @@ export class Brain {
 
   // reason: 'weak' (weight ran out) or 'unsupported' (trophic support ran out)
   removeSynapse(synapse, reason) {
+    if (synapse.contact) {
+      this.removeContact(synapse, reason);
+      return;
+    }
+    // Connectors are about to move, so their en passant contacts go first.
+    [synapse.axon, synapse.dendrite].forEach((c) => {
+      if (c) [...c.contacts].forEach((contact) => this.removeContact(contact, reason));
+    });
     this.events.push({ type: 'prune', synapse, reason });
     this.synapses = this.synapses.filter((s) => s !== synapse);
     this.spikes = this.spikes.filter((s) => s.synapse !== synapse);
@@ -543,6 +562,73 @@ export class Brain {
       } else {
         this.startRetract(c, this.p.partialRetract);
       }
+    });
+  }
+
+  removeContact(synapse, reason) {
+    this.events.push({ type: 'prune', synapse, reason });
+    this.synapses = this.synapses.filter((s) => s !== synapse);
+    this.spikes = this.spikes.filter((s) => s.synapse !== synapse);
+    [synapse.axon, synapse.dendrite].forEach((c) => {
+      if (c) c.contacts = c.contacts.filter((s) => s !== synapse);
+    });
+  }
+
+  // En passant: look for settled axon cells sitting right next to a settled
+  // dendrite cell of another neuron, a digit cell or an output cell, and
+  // sometimes form a synapse there. Settled connectors don't move, so the
+  // contact stays valid until one of them retracts (which removes it).
+  formContacts() {
+    const settled = (c) => c.state === 'connected';
+    const roomFor = (c) => c.contacts.length < this.p.maxContacts;
+    const tryPair = (fields) => {
+      if (this.random() >= this.p.enPassantChance) return;
+      this.addSynapse({ ...fields, contact: true });
+      const synapse = this.synapses.at(-1);
+      [fields.axon, fields.dendrite].forEach((c) => { if (c) c.contacts.push(synapse); });
+    };
+    const near = (cell) => NEIGHBORS.map(([dx, dy, dz]) => ({ x: cell.x + dx, y: cell.y + dy, z: cell.z + dz }))
+      .filter((n) => this.inside(n));
+    this.connectors.forEach((axon) => {
+      if (axon.type !== 'axon' || !settled(axon) || axon.owner.inhibitory) return;
+      axon.cells.forEach((cell, axonIndex) => {
+        near(cell).forEach((n) => {
+          if (!roomFor(axon)) return;
+          const content = this.cells.get(keyOf(n));
+          if (!content) return;
+          // Next to an output cell: feed it directly.
+          if (content.kind === 'node' && content.node.kind === 'output') {
+            const to = content.node;
+            if (!this.canLink(axon.owner, to) || axon.contacts.some((s) => s.to === to)) return;
+            tryPair({ from: axon.owner, to, axon, dendrite: null, axonIndex, cell, partnerCell: n });
+            return;
+          }
+          // Next to a settled dendrite (or a synapse cell at a dendrite's tip).
+          const dendrite = content.kind === 'connector' ? content.connector : content.synapse?.dendrite;
+          if (!dendrite || dendrite.type !== 'dendrite' || !settled(dendrite) || !roomFor(dendrite)) return;
+          if (!this.canLink(axon.owner, dendrite.owner) || dendrite.owner === axon.owner) return;
+          if (axon.synapse?.dendrite === dendrite || axon.contacts.some((s) => s.dendrite === dendrite)) return;
+          const dendriteIndex = dendrite.cells.findIndex((c) => keyOf(c) === keyOf(n));
+          if (dendriteIndex < 0) return;
+          tryPair({
+            from: axon.owner, to: dendrite.owner, axon, dendrite, axonIndex, dendriteIndex, cell, partnerCell: n,
+          });
+        });
+      });
+    });
+    // Settled dendrites next to a digit cell listen to it.
+    this.connectors.forEach((dendrite) => {
+      if (dendrite.type !== 'dendrite' || !settled(dendrite) || dendrite.owner.kind !== 'neuron') return;
+      dendrite.cells.forEach((cell, dendriteIndex) => {
+        near(cell).forEach((n) => {
+          if (!roomFor(dendrite)) return;
+          const content = this.cells.get(keyOf(n));
+          if (content?.kind !== 'node' || content.node.kind !== 'input') return;
+          const from = content.node;
+          if (dendrite.synapse?.from === from || dendrite.contacts.some((s) => s.from === from)) return;
+          tryPair({ from, to: dendrite.owner, axon: null, dendrite, dendriteIndex, cell: n, partnerCell: cell });
+        });
+      });
     });
   }
 
@@ -570,6 +656,15 @@ export class Brain {
 
   // Cells a spike crosses through this synapse, from source body to target body.
   path(synapse) {
+    if (synapse.contact) {
+      const out = synapse.axon
+        ? [synapse.from.soma, ...synapse.axon.cells.slice(0, synapse.axonIndex + 1)]
+        : [synapse.cell];
+      const back = synapse.dendrite
+        ? synapse.dendrite.cells.slice(0, synapse.dendriteIndex + 1).reverse().concat([synapse.to.soma])
+        : [synapse.partnerCell];
+      return out.concat(back);
+    }
     const out = synapse.axon ? [synapse.from.soma, ...synapse.axon.cells] : [synapse.cell];
     const back = synapse.dendrite ? synapse.dendrite.cells.slice(0, -1).reverse().concat([synapse.to.soma]) : [];
     return out.concat(back);
@@ -610,6 +705,7 @@ export class Brain {
       this.synapses.filter((s) => s.trophic < this.p.trophicFloor).forEach((s) => this.removeSynapse(s, 'unsupported'));
     }
     this.nodes.forEach((node) => { node.activity *= this.p.activityDecay; });
+    if (this.p.enPassant && this.tick % this.p.enPassantEvery === 0) this.formContacts();
     if (this.p.sproutChance) this.sprout();
     [...this.connectors].forEach((c) => {
       if (c.state === 'retracting') this.retract(c);

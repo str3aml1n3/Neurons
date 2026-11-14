@@ -96,6 +96,28 @@ seeds.forEach((seed) => {
   assert.ok(sprouts > 0 && eliminated > 0, 'lifecycle both sprouts and eliminates');
 }
 
+// Optional en passant synapses: contacts sit only on settled connectors and
+// their spike routes stay continuous.
+{
+  const brain = new Brain(seeded(3), { enPassant: true });
+  let contacts = 0;
+  for (let tick = 1; tick <= 15000; tick += 1) {
+    brain.step();
+    if (tick % 1000 === 0) {
+      brain.synapses.filter((s) => s.contact).forEach((s) => {
+        contacts += 1;
+        if (s.axon) assert.equal(s.axon.state, 'connected', 'en passant contacts only on settled axons');
+        if (s.dendrite) assert.equal(s.dendrite.state, 'connected', 'en passant contacts only on settled dendrites');
+        brain.path(s).forEach((cell, i, all) => {
+          if (i > 0) assert.equal(manhattan(all[i - 1], cell), 1, 'en passant route is continuous');
+        });
+        assert.equal(brain.path(s).length, s.path.length, 'en passant route does not change under a spike');
+      });
+    }
+  }
+  assert.ok(contacts > 0, 'en passant contacts form');
+}
+
 const accuracy = lateCorrect / lateTotal;
 assert.ok(accuracy > 0.53, `learns above chance (late accuracy ${accuracy.toFixed(2)})`);
 console.log(`Brain checks passed: late accuracy ${(accuracy * 100).toFixed(0)}% over ${seeds.length} seeds (chance is 50%)`);

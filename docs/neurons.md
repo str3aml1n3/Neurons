@@ -558,6 +558,36 @@ output cell) and \`inputAxons\` (axons per digit channel), both 1 by default.
   synapse forms wherever an axon passes next to another neuron's dendrite, so
   one connector can carry many, as in real cortex.
 
+### En passant experiments
+
+With \`enPassant\` on (off by default), synapses also form along the way: every
+\`enPassantEvery\` ticks, each settled (connected) excitatory axon cell that
+sits right next to a settled dendrite cell of another neuron, an output cell,
+or (for a settled dendrite) a digit cell, forms a synapse there with chance
+\`enPassantChance\`, up to \`maxContacts\` per connector. Contacts only form on
+settled connectors, because those no longer move. A spike through a contact
+runs along the axon to the contact, across it, and along the dendrite to its
+body. A contact behaves like any synapse (weight, support, learning, pruning).
+When a connector's main synapse is pruned and it retracts, its contacts are
+removed first.
+
+| Setting (networks 1–10) | Balanced accuracy | Synapses onto the outputs | Excitatory inputs per neuron | Digits an active neuron fires for |
+| --- | --- | --- | --- | --- |
+| Baseline | 74.0% | ~10 | ~1.2 | 5.5 |
+| En passant (any rate, 2–8 contacts) | 62.2–67.7% | 23–31 | 2.6–3.1 | 8.1–9.0 |
+| En passant + weaker new synapses | 64.6% | 30 | 3.1 | 8.8 |
+| En passant + STDP + winner-take-all (± scaling) | 63.1–64.3% | 27–30 | 2.5–3.3 | 7.6–8.7 |
+| En passant + strong competition (± sparse firing, weak synapses) | 54.0–63.8% | 26–30 | 1.8–2.6 | 6.5–7.3 |
+
+- **It removes the bottleneck:** the readout gets about three times as many
+  synapses and neurons about 2.5 times as many inputs.
+- **But accuracy drops by 6–12 points.** Neurons fire for 8–9 of the 10 digits:
+  each extra input is one more way to fire, so they become broad OR gates.
+  Even the strongest competition tried here didn't make them selective.
+- So fan-in was not the blocker by itself. What keeps the network near 74% is
+  that its neurons don't become selective detectors, whether they have few
+  inputs or many.
+
 ## What you see
 
 | Visual | Meaning |
@@ -651,4 +681,8 @@ All values live in `PARAMS` in [`web/brain.js`](../web/brain.js).
 | `lateralMode` | 'off' | Experimental winner-take-all: 'pool' (every excitatory neuron) or 'interneurons' (inhibitory neurons) inhibit neighbours when they fire |
 | `lateralRadius` | 3 | Reach of lateral inhibition in cells; 9 or more covers the cube |
 | `lateralStrength` | 0.5 | Share of the way to the inhibition floor per lateral hit |
+| `enPassant` | false | Experimental: synapses also form where settled axons pass settled dendrites, output cells or digit cells |
+| `enPassantEvery` | 10 | Ticks between looks for new en passant contacts |
+| `enPassantChance` | 0.02 | Chance per neighbouring pair per look |
+| `maxContacts` | 4 | En passant synapses per connector |
 | `pause` | 12 | Ticks between trials |
