@@ -13,6 +13,7 @@ class Brain {
     this.signalIndex = 0;
     this.pause = 0;
     this.ticks = 0;
+    this.edgeSequence = 0;
     this.rewards = 0;
     this.attempts = 0;
     this.dopamine = 0;
@@ -29,7 +30,9 @@ class Brain {
       for (let branch = 0; branch < 2; branch += 1) {
         const target = layerIndex < 2 ? this.layers[layerIndex + 1][(index + branch * 3) % 7] : null;
         const destination = target ? target.soma : { x: branch === 0 ? 1 : 7, y: 4, z: SIZE - 1 };
-        source.edges.push({ target, destination, axon: [source.soma], weight: 1 });
+        source.edges.push({
+          target, destination, axon: [source.soma], weight: 1, curveSeed: this.edgeSequence++,
+        });
       }
     }));
   }
@@ -145,7 +148,7 @@ scene.add(warmLight);
 const cube = new THREE.Group();
 scene.add(cube);
 const frame = new THREE.LineSegments(
-  new THREE.EdgesGeometry(new THREE.BoxGeometry(8.7, 8.7, 8.7)),
+  new THREE.EdgesGeometry(new THREE.BoxGeometry(9, 9, 9)),
   new THREE.LineBasicMaterial({
     color: 0x88d9ff, transparent: true, opacity: 0.95, depthTest: false, depthWrite: false,
   }),
@@ -153,11 +156,13 @@ const frame = new THREE.LineSegments(
 frame.renderOrder = 4;
 cube.add(frame);
 const gridPositions = [];
-for (let a = -4; a <= 4; a += 1) {
-  for (let b = -4; b <= 4; b += 1) {
-    gridPositions.push(-4, a, b, 4, a, b);
-    gridPositions.push(a, -4, b, a, 4, b);
-    gridPositions.push(a, b, -4, a, b, 4);
+for (let a = 0; a <= 9; a += 1) {
+  for (let b = 0; b <= 9; b += 1) {
+    const axisA = -4.5 + a;
+    const axisB = -4.5 + b;
+    gridPositions.push(-4.5, axisA, axisB, 4.5, axisA, axisB);
+    gridPositions.push(axisA, -4.5, axisB, axisA, 4.5, axisB);
+    gridPositions.push(axisA, axisB, -4.5, axisA, axisB, 4.5);
   }
 }
 const gridGeometry = new THREE.BufferGeometry();
@@ -165,13 +170,12 @@ gridGeometry.setAttribute('position', new THREE.Float32BufferAttribute(gridPosit
 const grid = new THREE.LineSegments(
   gridGeometry,
   new THREE.LineBasicMaterial({
-    color: 0x58bce8, transparent: true, opacity: 0.52, depthTest: false, depthWrite: false,
+    color: 0x58bce8, transparent: true, opacity: 0.42, depthWrite: false,
   }),
 );
-grid.renderOrder = 3;
 cube.add(grid);
 const shell = new THREE.Mesh(
-  new THREE.BoxGeometry(8.5, 8.5, 8.5),
+  new THREE.BoxGeometry(8.98, 8.98, 8.98),
   new THREE.MeshPhysicalMaterial({
     color: 0x245878, transparent: true, opacity: 0.025, roughness: 0.18, transmission: 0.2, depthWrite: false,
   }),
@@ -179,23 +183,34 @@ const shell = new THREE.Mesh(
 cube.add(shell);
 
 const pointToVector = ({ x, y, z }) => new THREE.Vector3(x - 4, 4 - y, z - 4);
-const segments = [];
-const segmentGeometry = new THREE.BoxGeometry(3.2, 0.35, 0.16);
-const verticalSegmentGeometry = new THREE.BoxGeometry(0.35, 2.25, 0.16);
+const digitCells = [];
+const digitCellGeometry = new THREE.BoxGeometry(0.9, 0.9, 0.16);
 const segmentMaterial = new THREE.MeshStandardMaterial({ color: 0xffc64b, emissive: 0xa96400, emissiveIntensity: 1.6 });
-[
-  [0, 3, 4.46, false], [1.75, 1.5, 4.46, true], [1.75, -1.5, 4.46, true],
-  [0, -3, 4.46, false], [-1.75, -1.5, 4.46, true], [-1.75, 1.5, 4.46, true],
-  [0, 0, 4.46, false],
-].forEach(([x, y, z, vertical], index) => {
-  const mesh = new THREE.Mesh(vertical ? verticalSegmentGeometry : segmentGeometry, segmentMaterial.clone());
-  mesh.position.set(x, y, z);
-  cube.add(mesh);
-  segments[index] = mesh;
-});
+
+function segmentAt(x, y) {
+  if (y === 1 && x >= 2 && x <= 6) return 0;
+  if (x === 7 && y >= 2 && y <= 3) return 1;
+  if (x === 7 && y >= 5 && y <= 6) return 2;
+  if (y === 7 && x >= 2 && x <= 6) return 3;
+  if (x === 1 && y >= 5 && y <= 6) return 4;
+  if (x === 1 && y >= 2 && y <= 3) return 5;
+  if (y === 4 && x >= 2 && x <= 6) return 6;
+  return null;
+}
+
+for (let x = 0; x < SIZE; x += 1) {
+  for (let y = 0; y < SIZE; y += 1) {
+    const segment = segmentAt(x, y);
+    if (segment === null) continue;
+    const cell = new THREE.Mesh(digitCellGeometry, segmentMaterial.clone());
+    cell.position.set(x - 4, 4 - y, 4.51);
+    cube.add(cell);
+    digitCells.push({ cell, segment });
+  }
+}
 
 const outputCells = [];
-const outputGeometry = new THREE.BoxGeometry(0.78, 0.78, 0.16);
+const outputGeometry = new THREE.BoxGeometry(0.9, 0.9, 0.16);
 for (let x = 0; x < SIZE; x += 1) {
   const ratio = x / (SIZE - 1);
   const material = new THREE.MeshStandardMaterial({
@@ -204,7 +219,7 @@ for (let x = 0; x < SIZE; x += 1) {
     emissiveIntensity: 1.4,
   });
   const cell = new THREE.Mesh(outputGeometry, material);
-  cell.position.set(x - 4, 0, -4.46);
+  cell.position.set(x - 4, 0, -4.51);
   cube.add(cell);
   outputCells.push(cell);
 }
@@ -227,29 +242,45 @@ cube.add(signalMesh);
 let brain = new Brain();
 const visuals = new Map();
 
-function lineFrom(points, color, opacity = 0.8) {
+function organicPoints(points, seed) {
+  const anchors = points.map(pointToVector);
+  if (anchors.length < 2) return anchors;
+  const offset = (index) => new THREE.Vector3(
+    Math.sin(seed * 4.17 + index * 1.71),
+    Math.cos(seed * 2.39 + index * 2.27),
+    Math.sin(seed * 3.11 + index * 1.13),
+  ).multiplyScalar(0.16);
+  const controls = anchors.map((point, index) => (
+    index === 0 || index === anchors.length - 1 ? point : point.clone().add(offset(index))
+  ));
+  return new THREE.CatmullRomCurve3(controls, false, 'centripetal').getPoints(
+    Math.max(8, controls.length * 5),
+  );
+}
+
+function lineFrom(points, color, opacity = 0.8, seed = 0) {
   const material = new THREE.LineBasicMaterial({
-    color, transparent: true, opacity, depthTest: false, depthWrite: false,
+    color, transparent: true, opacity, depthWrite: false,
   });
-  const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(points.map(pointToVector)), material);
-  line.renderOrder = 5;
+  const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(organicPoints(points, seed)), material);
+  line.userData.seed = seed;
   return line;
 }
 
 function createVisuals() {
   neuronGroup.clear();
   visuals.clear();
-  brain.neurons.forEach((neuron) => {
+  brain.neurons.forEach((neuron, neuronIndex) => {
     const style = layerStyles[neuron.layer];
     const soma = new THREE.Mesh(somaGeometry, new THREE.MeshStandardMaterial({
       color: style.soma, emissive: style.emissive, emissiveIntensity: 1.2,
     }));
     soma.position.copy(pointToVector(neuron.soma));
     neuronGroup.add(soma);
-    const dendrite = lineFrom(neuron.dendrite, style.line, 0.72);
+    const dendrite = lineFrom(neuron.dendrite, style.line, 0.72, 100 + neuronIndex);
     neuronGroup.add(dendrite);
     const edges = neuron.edges.map((edge) => {
-      const line = lineFrom(edge.axon, style.line);
+      const line = lineFrom(edge.axon, style.line, 0.95, edge.curveSeed);
       neuronGroup.add(line);
       return line;
     });
@@ -259,14 +290,14 @@ function createVisuals() {
 
 function updateLine(line, points) {
   line.geometry.dispose();
-  line.geometry = new THREE.BufferGeometry().setFromPoints(points.map(pointToVector));
+  line.geometry = new THREE.BufferGeometry().setFromPoints(organicPoints(points, line.userData.seed));
 }
 
 function syncVisuals() {
-  segments.forEach((segment, index) => {
-    const lit = (DIGITS[brain.digit] & (1 << index)) !== 0;
-    segment.material.emissiveIntensity = lit ? 1.6 : 0.03;
-    segment.material.color.setHex(lit ? 0xffc64b : 0x473b22);
+  digitCells.forEach(({ cell, segment }) => {
+    const lit = (DIGITS[brain.digit] & (1 << segment)) !== 0;
+    cell.material.emissiveIntensity = lit ? 1.6 : 0.03;
+    cell.material.color.setHex(lit ? 0xffc64b : 0x473b22);
   });
   brain.neurons.forEach((neuron) => {
     const visual = visuals.get(neuron);
