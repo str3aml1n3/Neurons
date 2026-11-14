@@ -404,6 +404,37 @@ channels.
   73.6% on two more: noise. No setting in this family beat the baseline
   consistently.
 
+### NMDA-like boost experiments
+
+Real dendrites respond supralinearly: NMDA receptors pass current only when the
+membrane is already depolarized, so coincident inputs add up to more than their
+sum. With \`nmdaGain\` above 0 (off by default), an excitatory input that arrives
+while the neuron's charge is above \`nmdaVoltage\` (0.3) is multiplied by the
+gain. Because charge leaks quickly, that only happens when inputs arrive within
+about a tick of each other. For a neuron to act as AND, a single input must
+also stay below threshold, so the boost was tested with weaker new synapses
+and a higher minimum threshold.
+
+| Setting (networks 1–10) | Balanced accuracy | Answers per run | Digits an active neuron fires for |
+| --- | --- | --- | --- |
+| Baseline | 74.0% | 791 | 5.5 |
+| NMDA boost 2 alone | 70.9% | 753 | 5.0 |
+| Weak synapses (0.6) + minimum threshold 0.9 | 70.0% | 543 | 4.9 |
+| Boost + weak synapses + minimum 0.9 | 57.8–64.0% | 282–300 | 3.0–3.5 |
+| …plus fire together | 63.0–65.7% | 397–439 | 4.7–6.2 |
+
+- **Neurons became more selective**, firing for about 3 digits instead of 5.5:
+  AND-like behavior.
+- **But the network went quiet and lost accuracy.** Far fewer answers, and the
+  combination neurons were pruned away. A selective neuron rarely fires at
+  first; learning only credits synapses that fired a neuron in a *rewarded*
+  answer, so its synapses earn no support and are pruned before they can
+  become useful.
+- **What's missing is learning without reward.** Every weight change in this
+  model is gated by dopamine. Real synapses also strengthen from timing alone
+  (Hebbian plasticity, STDP), with dopamine modulating it. That would let a
+  selective neuron's coincident inputs consolidate before any reward arrives.
+
 ## What you see
 
 | Visual | Meaning |
@@ -486,4 +517,6 @@ All values live in `PARAMS` in [`web/brain.js`](../web/brain.js).
 | `activityDecay` | 0.999 | Lifecycle: share of activity kept per tick |
 | `startMinimal` | false | Lifecycle: neurons start with one axon and one dendrite |
 | `coactivityGain` | 0 (off) | Experimental: "fire together, wire together" bias toward co-active partners |
+| `nmdaGain` | 0 (off) | Experimental: multiplier for input arriving while the neuron is already charged |
+| `nmdaVoltage` | 0.3 | Experimental: charge above which the NMDA-like boost applies |
 | `pause` | 12 | Ticks between trials |

@@ -71,6 +71,8 @@ export const PARAMS = {
   activityDecay: 0.999, // activity kept per tick (halves in about 700 ticks)
   startMinimal: false, // neurons are born with 1 axon and 1 dendrite
   coactivityGain: 0, // "fire together, wire together": bias toward co-active partners (0 = off)
+  nmdaGain: 0, // NMDA-like boost for input arriving while already charged (0 = off)
+  nmdaVoltage: 0.3, // charge above which the boost applies
   reward: 0.2,
   punish: 0.2,
   pause: 12,
@@ -636,7 +638,12 @@ export class Brain {
         this.outputPulse = { x: synapse.to.x, intensity: 1 };
       } else {
         // Recent inhibition shunts excitation: part of it leaks away.
-        synapse.to.potential += synapse.weight * (1 - synapse.to.shunt);
+        let charge = synapse.weight * (1 - synapse.to.shunt);
+        // NMDA-like boost: input arriving while the neuron is already charged
+        // (from another input moments ago) counts extra, so coincident inputs
+        // add up to more than their sum.
+        if (this.p.nmdaGain && synapse.to.potential > this.p.nmdaVoltage) charge *= this.p.nmdaGain;
+        synapse.to.potential += charge;
         synapse.lastArrival = this.tick;
       }
       return false;
