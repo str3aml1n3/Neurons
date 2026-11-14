@@ -285,6 +285,14 @@ rarely develops.
 | Violet cells (front, inner) | Dark-channel cells; glow while their segment is unlit and flash when they fire, faint violet otherwise |
 | Blue and red cells (back) | Output strip: blue = small, red = big |
 | Gold cube outline | Dopamine is being released |
+| Gold ring, expanding | A synapse was **strengthened** by the latest answer (and, on a correct answer, gained trophic support) |
+| Blue ring, contracting | A synapse was **weakened** by the latest answer |
+| Grey ring, bursting | A synapse was **pruned**: its weight or its trophic support ran out |
+| Small white flash | A new synapse **formed** |
+| "Last answer" in the HUD | How many synapses the latest answer strengthened, weakened and pruned |
+
+Each synapse shows at most one strengthen or weaken ring per answer: if several
+learning rules touch the same synapse, their changes are added up first.
 
 ## Parameters
 

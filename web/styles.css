@@ -171,6 +171,10 @@ button:focus-visible {
   color: var(--gold);
 }
 
+#changes {
+  color: var(--muted);
+}
+
 .legend {
   display: flex;
   flex-wrap: wrap;
@@ -201,6 +205,9 @@ button:focus-visible {
 .swatch.spike { border-radius: 50%; background: var(--spike); box-shadow: 0 0 8px 2px #ffd35a; }
 .swatch.dark { border-radius: 50%; background: #d9c6ff; box-shadow: 0 0 8px 2px var(--dark); }
 .swatch.inhibitory { height: 0.3rem; border-radius: 0.1rem; background: var(--inhibitory); box-shadow: 0 0 6px var(--inhibitory); }
+.swatch.ring { border-radius: 50%; background: transparent; border: 2px solid; }
+.swatch.strengthen { border-color: var(--gold); box-shadow: 0 0 6px var(--gold); }
+.swatch.weaken { border-color: #4f9dff; box-shadow: 0 0 6px #4f9dff; }
 .swatch.small { background: var(--small); }
 .swatch.big { background: var(--big); }
 

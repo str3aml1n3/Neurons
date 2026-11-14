@@ -19,6 +19,10 @@ const COLORS = {
   neutral: 0x4a5266,
   gold: 0xffc64b,
   frame: 0x88d9ff,
+  strengthen: 0xffc64b, // synapse strengthened (dopamine gold)
+  weaken: 0x4f9dff, // synapse weakened (ice blue)
+  prune: 0x8e97a8, // synapse removed
+  form: 0xffffff, // new synapse
 };
 
 const canvas = document.querySelector('#scene');
@@ -27,6 +31,7 @@ const statusElement = document.querySelector('#status');
 const scoreElement = document.querySelector('#score');
 const recentElement = document.querySelector('#recent');
 const synapseElement = document.querySelector('#synapses');
+const changesElement = document.querySelector('#changes');
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -227,6 +232,21 @@ const synapseMesh = instanced(new THREE.BoxGeometry(0.36, 0.36, 0.36), new THREE
   emissive: COLORS.synapse, emissiveIntensity: 0.25,
 }), 400);
 
+// Synapse events (strengthened, weakened, pruned, formed) show as short-lived
+// rings that face the camera: one instanced mesh for all of them.
+const MAX_RINGS = 400;
+const ringMesh = instanced(new THREE.RingGeometry(0.82, 1, 40), new THREE.MeshBasicMaterial({
+  transparent: true, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+}), MAX_RINGS);
+ringMesh.renderOrder = 9;
+const RING_STYLE = {
+  strengthen: { color: new THREE.Color(COLORS.strengthen), from: 0.2, to: 0.75, ms: 1100 }, // expands
+  weaken: { color: new THREE.Color(COLORS.weaken), from: 0.75, to: 0.15, ms: 1100 }, // contracts
+  prune: { color: new THREE.Color(COLORS.prune), from: 0.3, to: 1.3, ms: 900 }, // bursts
+  form: { color: new THREE.Color(COLORS.form), from: 0.05, to: 0.45, ms: 600 },
+};
+let rings = []; // { position, style, start }
+
 // Signals: glowing points drawn over everything, with a short fading trail.
 const MAX_SPIKES = 600;
 const TRAIL = [0, 0.35, 0.7];
@@ -377,6 +397,25 @@ function updateOccupancy() {
   finish(occupancy, count);
 }
 
+function collectEvents(time) {
+  brain.events.forEach(({ type, synapse }) => {
+    if (rings.length >= MAX_RINGS) rings.shift();
+    rings.push({ position: cellToVector(synapse.cell), style: RING_STYLE[type], start: time });
+  });
+}
+
+function updateRings(time) {
+  rings = rings.filter((ring) => time - ring.start < ring.style.ms);
+  rings.forEach((ring, i) => {
+    const t = (time - ring.start) / ring.style.ms;
+    const eased = 1 - (1 - t) ** 2;
+    const { from, to, color } = ring.style;
+    place(ringMesh, i, ring.position, from + (to - from) * eased, camera.quaternion);
+    ringMesh.setColorAt(i, tint.copy(color).multiplyScalar(1 - t));
+  });
+  finish(ringMesh, rings.length);
+}
+
 function updateHud() {
   digitElement.textContent = brain.digit;
   const rewarded = brain.dopamine > 0.1;
@@ -388,6 +427,10 @@ function updateHud() {
     ? `Last ${recent.length}: ${Math.round((100 * recent.filter(Boolean).length) / recent.length)}%`
     : 'Last 50: –';
   synapseElement.textContent = `Synapses ${brain.synapses.length}`;
+  const changes = brain.lastChanges;
+  changesElement.textContent = changes
+    ? `Last answer: ${changes.strengthened} stronger · ${changes.weakened} weaker · ${changes.pruned} pruned`
+    : '';
 }
 
 // Runs once per simulation step.
@@ -629,15 +672,18 @@ function animate(time) {
     brain.step();
     lastStep = time;
     syncScene();
+    collectEvents(time);
   }
   updateSpikes(Math.min(1, (time - lastStep) / STEP_MS));
   updateGlow(time);
+  updateRings(time);
   controls.update();
   renderer.render(scene, camera);
 }
 
 document.querySelector('#reset').addEventListener('click', () => {
   brain = new Brain();
+  rings = [];
   createScene();
   syncScene();
 });

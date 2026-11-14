@@ -126,6 +126,10 @@ export class Brain {
     this.outputPulse = null;
     this.pause = 0;
     this.status = 'Growing connections';
+    // What happened to synapses during the latest step, for display:
+    // { type: 'strengthen' | 'weaken' | 'prune' | 'form', synapse, reason? }
+    this.events = [];
+    this.lastChanges = null; // counts from the latest answer
     this.createIONodes();
     this.placeNeurons();
     // Connector objects are fixed after construction (they retract and regrow
@@ -376,13 +380,16 @@ export class Brain {
       c.synapse = synapse;
     });
     if (synapse.axon && synapse.dendrite) this.cells.set(keyOf(synapse.cell), { kind: 'synapse', synapse });
+    this.events.push({ type: 'form', synapse });
     // Connected connectors don't move until the synapse is removed, so the
     // route a spike takes is computed once.
     synapse.path = this.path(synapse);
     this.synapses.push(synapse);
   }
 
-  removeSynapse(synapse) {
+  // reason: 'weak' (weight ran out) or 'unsupported' (trophic support ran out)
+  removeSynapse(synapse, reason) {
+    this.events.push({ type: 'prune', synapse, reason });
     this.synapses = this.synapses.filter((s) => s !== synapse);
     this.spikes = this.spikes.filter((s) => s.synapse !== synapse);
     if (synapse.axon && synapse.dendrite) {
@@ -448,6 +455,7 @@ export class Brain {
 
   step() {
     this.tick += 1;
+    this.events = [];
     this.dopamine *= 0.9;
     if (this.outputPulse) {
       this.outputPulse.intensity *= 0.9;
@@ -456,7 +464,7 @@ export class Brain {
     // Trophic support fades unless rewarded answers renew it.
     this.synapses.forEach((s) => { s.trophic *= this.p.trophicDecay; });
     if (this.tick % 50 === 0) {
-      this.synapses.filter((s) => s.trophic < this.p.trophicFloor).forEach((s) => this.removeSynapse(s));
+      this.synapses.filter((s) => s.trophic < this.p.trophicFloor).forEach((s) => this.removeSynapse(s, 'unsupported'));
     }
     this.connectors.forEach((c) => {
       if (c.state === 'retracting') this.retract(c);
@@ -634,9 +642,9 @@ export class Brain {
     this.answer = side;
     this.attempts += 1;
     this.history.push(correct);
-    const change = (synapse, amount) => {
-      synapse.weight = Math.max(this.p.minWeight, Math.min(this.p.maxWeight, synapse.weight + amount));
-    };
+    // Net change per synapse; applied (and reported) once all rules have run.
+    const deltas = new Map();
+    const change = (synapse, amount) => deltas.set(synapse, (deltas.get(synapse) ?? 0) + amount);
     // Excitation: the chain behind the answer is strengthened if it was
     // right and weakened if it was wrong.
     const behindAnswer = this.eligible(side);
@@ -652,7 +660,18 @@ export class Brain {
     this.shareTrophic([...helpfulChain]);
     this.chain(harmful).forEach((s) => change(s, -this.p.punish));
     this.lastEligible = new Set([...behindAnswer, ...helpfulChain]);
-    this.synapses.filter((s) => s.weight < this.p.pruneBelow).forEach((s) => this.removeSynapse(s));
+    let strengthened = 0;
+    let weakened = 0;
+    deltas.forEach((amount, synapse) => {
+      if (amount === 0) return;
+      synapse.weight = Math.max(this.p.minWeight, Math.min(this.p.maxWeight, synapse.weight + amount));
+      this.events.push({ type: amount > 0 ? 'strengthen' : 'weaken', synapse });
+      if (amount > 0) strengthened += 1;
+      else weakened += 1;
+    });
+    const before = this.synapses.length;
+    this.synapses.filter((s) => s.weight < this.p.pruneBelow).forEach((s) => this.removeSynapse(s, 'weak'));
+    this.lastChanges = { strengthened, weakened, pruned: before - this.synapses.length };
     if (correct) {
       this.rewards += 1;
       this.dopamine = 1;
