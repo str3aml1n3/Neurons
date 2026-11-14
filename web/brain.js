@@ -59,6 +59,11 @@ export const PARAMS = {
   inputPeriod: 5, // ticks between spikes from a lit segment
   trialTicks: 60, // ticks before a trial times out with no answer
   window: 35, // trial tick at which the output strip's votes are compared
+  // Experimental learning options (all off by default):
+  scaling: 0, // synaptic scaling rate after an answer (0 = off, 1 = all the way to the budget)
+  scalingTotal: 0, // input budget per neuron: 0 = keep the average input at initialWeight, > 0 = fixed total
+  timingCredit: 0, // 0 = flat credit; else credit = timingCredit^(ticks between arrival and firing)
+  retryWrong: true, // after a wrong answer, show the same digit again
   reward: 0.2,
   punish: 0.2,
   pause: 12,
@@ -488,7 +493,7 @@ export class Brain {
     this.votes = { small: 0, big: 0 };
     this.spikes = [];
     this.nodes.forEach((n) => { n.potential = 0; n.refractory = 0; n.shunt = 0; n.contrib = new Set(); });
-    this.synapses.forEach((s) => { s.delivered = false; s.active = false; });
+    this.synapses.forEach((s) => { s.delivered = false; s.active = false; s.credit = 0; });
   }
 
   step() {
@@ -544,6 +549,7 @@ export class Brain {
       } else if (synapse.to.kind === 'output') {
         this.votes[synapse.to.small ? 'small' : 'big'] += synapse.weight;
         synapse.delivered = true;
+        synapse.credit = 1;
         synapse.to.lastFired = this.tick;
         this.outputPulse = { x: synapse.to.x, intensity: 1 };
       } else {
@@ -582,6 +588,8 @@ export class Brain {
       this.synapses.forEach((s) => {
         if (s.to === neuron && !s.inhibitory && this.tick - s.lastArrival <= this.p.coincidence) {
           neuron.contrib.add(s);
+          const late = this.tick - s.lastArrival; // 0 = arrived in the firing tick
+          s.credit = Math.max(s.credit ?? 0, this.p.timingCredit ? this.p.timingCredit ** late : 1);
         }
         if (s.from === neuron) this.emit(s);
       });
@@ -675,6 +683,21 @@ export class Brain {
     });
   }
 
+  // Synaptic scaling: each neuron pulls the total of its excitatory inputs
+  // toward a budget, so strengthening one input weakens the others.
+  scaleInputs(neurons) {
+    neurons.forEach((neuron) => {
+      const inputs = this.synapses.filter((syn) => syn.to === neuron && !syn.inhibitory);
+      if (!inputs.length) return;
+      const total = inputs.reduce((sum, syn) => sum + syn.weight, 0);
+      const budget = this.p.scalingTotal || inputs.length * this.p.initialWeight;
+      const factor = 1 + this.p.scaling * (budget / total - 1);
+      inputs.forEach((syn) => {
+        syn.weight = Math.max(this.p.minWeight, Math.min(this.p.maxWeight, syn.weight * factor));
+      });
+    });
+  }
+
   learn(side) {
     const correct = (side === 'small') === (this.digit < 5);
     this.answer = side;
@@ -682,7 +705,10 @@ export class Brain {
     this.history.push(correct);
     // Net change per synapse; applied (and reported) once all rules have run.
     const deltas = new Map();
-    const change = (synapse, amount) => deltas.set(synapse, (deltas.get(synapse) ?? 0) + amount);
+    const change = (synapse, amount) => {
+      const credit = synapse.credit > 0 ? synapse.credit : 1;
+      deltas.set(synapse, (deltas.get(synapse) ?? 0) + amount * credit);
+    };
     // Excitation: the chain behind the answer is strengthened if it was
     // right and weakened if it was wrong.
     const behindAnswer = this.eligible(side);
@@ -707,6 +733,10 @@ export class Brain {
       if (amount > 0) strengthened += 1;
       else weakened += 1;
     });
+    if (this.p.scaling) {
+      const touched = new Set([...deltas.keys()].map((syn) => syn.to).filter((node) => node.kind === 'neuron'));
+      this.scaleInputs(touched);
+    }
     const before = this.synapses.length;
     this.synapses.filter((s) => s.weight < this.p.pruneBelow).forEach((s) => this.removeSynapse(s, 'weak'));
     this.lastChanges = { strengthened, weakened, pruned: before - this.synapses.length };
@@ -717,7 +747,8 @@ export class Brain {
       const next = this.randInt(9);
       this.digit = next >= this.digit ? next + 1 : next;
     } else {
-      this.status = 'Not yet - trying again';
+      this.status = this.p.retryWrong ? 'Not yet - trying again' : 'Not quite - next digit';
+      if (!this.p.retryWrong) this.digit = this.randInt(10);
     }
     this.spikes = [];
     this.pause = this.p.pause;

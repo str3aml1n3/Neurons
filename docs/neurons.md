@@ -305,6 +305,29 @@ so differences of about 3 points or less are noise.
   learning rule (one flat ±0.2 for every responsible synapse) rather than to
   capacity.
 
+### Learning experiments
+
+Three changes to learning were tried, each switchable by a parameter and
+**off by default**. Results use *balanced accuracy*, the mean of the ten
+per-digit accuracies, because retrying wrong answers shows hard digits more
+often and would otherwise distort the comparison.
+
+| Option | Networks 1–10 | Networks 11–20 |
+| --- | --- | --- |
+| Baseline | 72.9% | 76.4% |
+| **Synaptic scaling**: after an answer, each changed neuron rescales its excitatory inputs toward a budget (\`scaling\`, \`scalingTotal\`) | 63.9–71.5% depending on budget and rate | 71.5% (rate 0.3) |
+| **Timing credit**: a synapse's change shrinks by \`timingCredit\` per tick its signal arrived before the firing | 71.9% (0.5), 74.4% (0.7) | 73.1% (0.7) |
+| **Random next digit** after a wrong answer (\`retryWrong: false\`) | 67.8% | — |
+
+- **Synaptic scaling hurt.** Making inputs compete for a fixed budget weakened
+  the inputs that rarely get credit but are still needed, and they were pruned.
+  The stronger the competition, the worse the accuracy.
+- **Timing credit made no difference.** Its best setting scored above baseline
+  on one set of networks and below on the other.
+- **Retrying wrong answers helps.** Without retries, 0 and 7 dropped to 37%
+  and 31%. Repetition gives hard digits extra practice, a natural curriculum.
+  It is not the cause of the ~70% ceiling.
+
 ## What you see
 
 | Visual | Meaning |
@@ -377,4 +400,8 @@ All values live in `PARAMS` in [`web/brain.js`](../web/brain.js).
 | `window` | 35 | Trial tick when votes are compared |
 | `trialTicks` | 60 | Trial length before giving up |
 | `reward` / `punish` | 0.2 / 0.2 | Weight change after a correct / wrong answer |
+| `scaling` | 0 (off) | Experimental: synaptic scaling rate after an answer |
+| `scalingTotal` | 0 | Experimental: input budget per neuron (0 = keep the average at `initialWeight`) |
+| `timingCredit` | 0 (off) | Experimental: credit factor per tick between a signal's arrival and the firing |
+| `retryWrong` | true | Show the same digit again after a wrong answer |
 | `pause` | 12 | Ticks between trials |
