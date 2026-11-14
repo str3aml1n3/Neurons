@@ -32,7 +32,7 @@ run, and download the **neurons-debug-apk** artifact. Unzip it and transfer
 installation from that source if Android asks. This is a debug-signed build,
 not a Play Store release.
 
-To build locally, install JDK 17 and Android SDK platform 35, then run
+To build locally, install JDK 17 and Android SDK platform 36, then run
 `./gradlew assembleDebug`. The APK is at
 `app/build/outputs/apk/debug/app-debug.apk`.
 
@@ -47,15 +47,15 @@ java -cp /tmp/neurons-test com.example.neurons.BrainTest
 ## Copilot emulator
 
 After `.github/workflows/copilot-setup-steps.yml` is merged into the default
-branch, Copilot's setup installs the Android emulator, an API 35 x86_64 image,
-and an AVD named `neurons-api35`, and warms the Gradle build cache. GitHub's
+branch, Copilot's setup installs the Android emulator, an API 36 x86_64 image,
+and an AVD named `neurons-api36`, and warms the Gradle build cache. GitHub's
 Copilot setup supports runner steps, but not a job-level container; the SDK is
 therefore installed on its Ubuntu runner rather than in a custom container.
 Hardware acceleration depends on `/dev/kvm` being exposed to the agent. If it
 is unavailable, the emulator can use `-accel off`, which is much slower.
 
 For example, start the AVD with
-`"$ANDROID_HOME/emulator/emulator" -avd neurons-api35 -no-window -no-audio -no-snapshot`
+`"$ANDROID_HOME/emulator/emulator" -avd neurons-api36 -no-window -no-audio -no-snapshot`
 and wait for Android to boot before installing an APK with
 `"$ANDROID_HOME/platform-tools/adb" install -r app/build/outputs/apk/debug/app-debug.apk`.
 Launch the app with `adb shell am start -n io.github.str3aml1n3.neurons/com.example.neurons.MainActivity`

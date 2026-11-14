@@ -4,12 +4,12 @@ plugins {
 
 android {
     namespace 'com.example.neurons'
-    compileSdk 35
+    compileSdk 36
 
     defaultConfig {
         applicationId 'io.github.str3aml1n3.neurons'
         minSdk 23
-        targetSdk 35
+        targetSdk 36
         versionCode providers.environmentVariable('RELEASE_VERSION_CODE').getOrElse('1').toInteger()
         versionName '1.0'
     }
