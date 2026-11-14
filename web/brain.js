@@ -83,27 +83,43 @@ const rect = (x0, x1, y0, y1) => {
   for (let y = y0; y <= y1; y += 1) for (let x = x0; x <= x1; x += 1) cells.push({ x, y });
   return cells;
 };
-export const SEGMENT_LAYOUT = [
-  { lit: rect(2, 6, 0, 0), dark: rect(2, 6, 1, 1) }, // a: top
-  { lit: rect(8, 8, 2, 3), dark: rect(7, 7, 2, 3) }, // b: top right
-  { lit: rect(8, 8, 5, 6), dark: rect(7, 7, 5, 6) }, // c: bottom right
-  { lit: rect(2, 6, 8, 8), dark: rect(2, 6, 7, 7) }, // d: bottom
-  { lit: rect(0, 0, 5, 6), dark: rect(1, 1, 5, 6) }, // e: bottom left
-  { lit: rect(0, 0, 2, 3), dark: rect(1, 1, 2, 3) }, // f: top left
-  { lit: rect(2, 6, 4, 4), dark: rect(2, 6, 5, 5) }, // g: middle
-];
+// The same layout for any face width w >= 7 (the dark rows of the middle and
+// bottom bars collide below that). m is the middle row.
+export function faceLayout(w) {
+  const m = Math.floor((w - 1) / 2);
+  const last = w - 1;
+  return [
+    { lit: rect(2, w - 3, 0, 0), dark: rect(2, w - 3, 1, 1) }, // a: top
+    { lit: rect(last, last, 2, m - 1), dark: rect(last - 1, last - 1, 2, m - 1) }, // b: top right
+    { lit: rect(last, last, m + 1, w - 3), dark: rect(last - 1, last - 1, m + 1, w - 3) }, // c: bottom right
+    { lit: rect(2, w - 3, last, last), dark: rect(2, w - 3, last - 1, last - 1) }, // d: bottom
+    { lit: rect(0, 0, m + 1, w - 3), dark: rect(1, 1, m + 1, w - 3) }, // e: bottom left
+    { lit: rect(0, 0, 2, m - 1), dark: rect(1, 1, 2, m - 1) }, // f: top left
+    { lit: rect(2, w - 3, m, m), dark: rect(2, w - 3, m + 1, m + 1) }, // g: middle
+  ];
+}
 
-export const SEGMENT_CELLS = SEGMENT_LAYOUT.flatMap(({ lit, dark }, segment) => [
+const layoutCells = (layout) => layout.flatMap(({ lit, dark }, segment) => [
   ...lit.map(({ x, y }) => ({ x, y, z: 0, segment, channel: 'lit' })),
   ...dark.map(({ x, y }) => ({ x, y, z: 0, segment, channel: 'dark' })),
 ]);
 
-// Output strip on the back face. x < 4 means small, x > 4 means big, and the
-// middle cell is neutral.
-export const OUTPUT_CELLS = [];
-for (let x = 0; x < SIZE; x += 1) {
-  if (x !== 4) OUTPUT_CELLS.push({ x, y: 4, z: SIZE - 1, small: x < 4 });
+// Output strip across the middle row of the back face, w cells wide. The left
+// half votes small and the right half big; on an odd width the middle cell is
+// neutral (not part of the strip).
+export function outputStrip(w) {
+  const m = Math.floor((w - 1) / 2);
+  const cells = [];
+  for (let x = 0; x < w; x += 1) {
+    if (w % 2 === 1 && x === m) continue;
+    cells.push({ x, y: m, z: w - 1, small: x < w / 2 });
+  }
+  return cells;
 }
+
+export const SEGMENT_LAYOUT = faceLayout(SIZE);
+export const SEGMENT_CELLS = layoutCells(SEGMENT_LAYOUT);
+export const OUTPUT_CELLS = outputStrip(SIZE);
 
 const NEIGHBORS = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
 // Fixed strides, so keys work for any cube size up to 64.
@@ -115,11 +131,13 @@ export class Brain {
     this.random = random;
     this.p = { ...PARAMS, ...params };
     this.size = this.p.size;
-    // The digit and output strip are laid out for a 9-wide face; on a bigger
-    // cube they are centered on the front and back faces.
-    const offset = Math.floor((this.size - 9) / 2);
-    this.segmentCells = SEGMENT_CELLS.map((c) => ({ ...c, x: c.x + offset, y: c.y + offset }));
-    this.outputCells = OUTPUT_CELLS.map((c) => ({
+    // The digit and output strip fill the face up to 9 cells wide; on a bigger
+    // cube they stay 9 wide, centered on the front and back faces.
+    if (this.size < 7) throw new Error('The cube must be at least 7 cells wide to fit the digit.');
+    const face = Math.min(this.size, 9);
+    const offset = Math.floor((this.size - face) / 2);
+    this.segmentCells = layoutCells(faceLayout(face)).map((c) => ({ ...c, x: c.x + offset, y: c.y + offset }));
+    this.outputCells = outputStrip(face).map((c) => ({
       ...c, strip: c.x, x: c.x + offset, y: c.y + offset, z: this.size - 1,
     }));
     this.tick = 0;

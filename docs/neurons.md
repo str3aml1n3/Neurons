@@ -275,6 +275,8 @@ so differences of about 3 points or less are noise.
 | Change | Accuracy |
 | --- | --- |
 | Defaults (cube 9, 16 neurons, ≤3 axons, ≤3 dendrites) | 68.9% |
+| Cube 7 / 8 | 67.9 / 71.0% |
+| Cube 7 with 8 or 12 neurons; cube 8 with 12 neurons | 68.9 / 65.8%; 66.4% |
 | Cube 11 / 13 / 15 | 66.9 / 64.5 / 58.1% |
 | Cube 13 with longer reach (14 cells, 42 steps) | 66.2% |
 | Cube 13 with 48 neurons (same density) | 66.3% |
@@ -287,6 +289,11 @@ so differences of about 3 points or less are noise.
   space only adds distance: connectors take longer to reach anything, fewer
   answers happen, and some networks barely learn. Longer reach recovers about
   half of the loss; keeping the neuron density doesn't help.
+- **A smaller cube doesn't help.** Cubes 7 and 8 stay within noise of cube 9,
+  though individual networks vary more (from 56% up to 92% at cube 8). On a
+  cube smaller than 9 the digit and output strip shrink to the face (3-cell bars
+  at cube 7), and at cube 7 only about 14.5 of 16 neurons fit. 7 is the
+  minimum: below that, the dark rows of the middle and bottom bars collide.
 - **Network size barely matters** from 12 to 32 neurons.
 - **One dendrite per neuron is too few:** neurons get about one input each and
   can't combine anything. Two or more is enough.
@@ -332,7 +339,7 @@ All values live in `PARAMS` in [`web/brain.js`](../web/brain.js).
 
 | Parameter | Value | Meaning |
 | --- | --- | --- |
-| `size` | 9 | Cube edge in cells. On a bigger cube the 9-wide digit and output strip are centered on their faces. (The app always draws 9.) |
+| `size` | 9 | Cube edge in cells, at least 7. Up to 9, the digit and output strip fill their faces; on a bigger cube they stay 9 wide, centered. (The app always draws 9.) |
 | `neurons` | 16 | Number of neurons |
 | `maxAxons` | 3 | Each neuron gets 1 to this many axons |
 | `maxDendrites` | 3 | Each neuron gets 1 to this many dendrites |
