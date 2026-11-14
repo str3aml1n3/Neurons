@@ -203,7 +203,7 @@ for (let x = 0; x < SIZE; x += 1) {
     const segment = segmentAt(x, y);
     if (segment === null) continue;
     const cell = new THREE.Mesh(digitCellGeometry, segmentMaterial.clone());
-    cell.position.set(x - 4, 4 - y, 4.51);
+    cell.position.set(x - 4, 4 - y, -4.51);
     cube.add(cell);
     digitCells.push({ cell, segment });
   }
@@ -219,7 +219,7 @@ for (let x = 0; x < SIZE; x += 1) {
     emissiveIntensity: 1.4,
   });
   const cell = new THREE.Mesh(outputGeometry, material);
-  cell.position.set(x - 4, 0, -4.51);
+  cell.position.set(x - 4, 0, 4.51);
   cube.add(cell);
   outputCells.push(cell);
 }
