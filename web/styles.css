@@ -148,6 +148,48 @@ button:focus-visible {
   margin: 0;
 }
 
+.status-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+}
+
+/* Segmented speed control. */
+.speed {
+  display: inline-flex;
+  border: 1px solid #3a5a7a;
+  border-radius: 999px;
+  overflow: hidden;
+  pointer-events: auto;
+}
+
+.speed button {
+  min-height: 2.25rem;
+  min-width: 3rem;
+  border: 0;
+  border-radius: 0;
+  padding: 0.35rem 0.75rem;
+  color: #c4d2e8;
+  background: rgb(10 20 38 / 80%);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.speed button + button {
+  border-left: 1px solid #3a5a7a;
+}
+
+.speed button:hover {
+  background: #1b3354;
+}
+
+.speed button[aria-pressed="true"] {
+  color: #07101f;
+  background: #8ee8df;
+}
+
 #status {
   color: #d7edff;
   font-size: 1rem;

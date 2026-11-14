@@ -27,7 +27,15 @@
       </header>
 
       <footer class="hud bottom">
-        <p id="status" aria-live="polite">Growing connections</p>
+        <div class="status-row">
+          <p id="status" aria-live="polite">Growing connections</p>
+          <div class="speed" role="group" aria-label="Simulation speed">
+            <button type="button" data-speed="1" aria-pressed="true">1×</button>
+            <button type="button" data-speed="10" aria-pressed="false">10×</button>
+            <button type="button" data-speed="100" aria-pressed="false">100×</button>
+            <button type="button" data-speed="max" aria-pressed="false" title="As fast as this device allows">Max</button>
+          </div>
+        </div>
         <p class="stats">
           <span id="score">Correct 0 / 0</span>
           <span id="recent">Last 50: –</span>

@@ -33,8 +33,11 @@ The full rules, parameters and the meaning of every color are in
 (chance is 50%).
 
 Drag with a mouse or finger to rotate the cube, and pinch or scroll to zoom.
-Press **Reset** to grow a new network. Nothing is saved, so reloading the page
-resets everything.
+Press **Reset** to grow a new network. Use the **1× / 10× / 100× / Max** buttons
+to speed up time: Max runs as many steps as the device can while keeping the
+animation smooth, enough to train a network for thousands of answers in about a
+minute. Nothing is saved, so reloading the page resets the network (the chosen
+speed is remembered).
 
 > **This is an educational toy, not a biologically accurate brain simulation.**
 > Dendrites, axons and dopamine are simplified stand-ins, and there is no claim

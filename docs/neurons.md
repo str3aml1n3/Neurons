@@ -252,6 +252,21 @@ The headless test (`node tests/brain.test.mjs`) runs 5 random networks for
 between networks: averages over 10 networks still move by 3–4 points from one
 set of networks to another, so the experiments below use two or three sets.
 
+**Longer training helps a little.** Measured as balanced accuracy over the last
+400 answers of 10 networks:
+
+| Training | Balanced accuracy | Range |
+| --- | --- | --- |
+| 40,000 ticks (~800 answers) | 77.3% | 67–89% |
+| 100,000 ticks | 78.9% | 69–89% |
+| 200,000 ticks | 78.6% | 66–87% |
+| 400,000 ticks (~8,000 answers) | 80.6% | 73–85% |
+
+Ten times more training adds about 3 points on average and lifts the weakest
+networks most. In the browser, the **Max** speed button gets there in about a
+minute. (The experiments below measure over the last 40% of a 40,000-tick run,
+so their numbers are a few points lower than this table's first row.)
+
 Over 10 networks and 40,000 ticks, the regrowth rules (partial retraction,
 avoiding pruned partners, local and clustered regrowth, trophic competition)
 cut prunes by about 40% and rebuilt same-partner connections by about 70%. They
@@ -500,6 +515,7 @@ accuracy with a third fewer synapses. The rest stay available as parameters.
 | Grey ring, bursting | A synapse was **pruned**: its weight or its trophic support ran out |
 | Small white flash | A new synapse **formed** |
 | "Last answer" in the HUD | How many synapses the latest answer strengthened, weakened and pruned |
+| 1× / 10× / 100× / Max | Simulation speed. 1× is 10 steps a second; Max runs as many as fit in about 10 ms of each frame. Above 10×, event rings are shown for the latest step at most every 100 ms, so they stay readable. |
 
 Each synapse shows at most one strengthen or weaken ring per answer: if several
 learning rules touch the same synapse, their changes are added up first.

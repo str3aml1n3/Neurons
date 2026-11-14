@@ -666,17 +666,60 @@ function adaptResolution(time) {
   lastWidth = 0; // force resize() to apply the new resolution
 }
 
+// Speed: 1 = 10 steps a second. Faster speeds run several steps per frame and
+// redraw once; "max" runs as many as fit in about 10 ms of each frame.
+let speed = 1;
+try {
+  const saved = localStorage.getItem('neuron-sim-speed');
+  if (saved) speed = saved === 'max' ? Infinity : Number(saved) || 1;
+} catch {
+  // storage unavailable: keep 1×
+}
+const FRAME_BUDGET_MS = 10;
+
+function setSpeed(value) {
+  speed = value === 'max' ? Infinity : Number(value);
+  document.querySelectorAll('.speed button').forEach((button) => {
+    button.setAttribute('aria-pressed', String(button.dataset.speed === String(value)));
+  });
+  try {
+    localStorage.setItem('neuron-sim-speed', String(value));
+  } catch {
+    // storage unavailable: the choice lasts until reload
+  }
+}
+document.querySelectorAll('.speed button').forEach((button) => {
+  button.addEventListener('click', () => setSpeed(button.dataset.speed));
+});
+setSpeed(speed === Infinity ? 'max' : speed);
+
 let lastStep = 0;
+let lastRings = 0;
 function animate(time) {
   adaptResolution(time);
   resize();
-  if (time - lastStep >= STEP_MS) {
-    brain.step();
-    lastStep = time;
+  const interval = STEP_MS / speed; // 0 at max speed
+  if (time - lastStep >= interval) {
+    const due = interval > 0 ? Math.floor((time - lastStep) / interval) : Infinity;
+    const stop = performance.now() + FRAME_BUDGET_MS;
+    let steps = 0;
+    // Up to 10x every step's synapse events get a ring. Faster, only the latest
+    // step's, at most every 100 ms (as at 1x), so the rings stay readable.
+    const everyStep = speed <= 10;
+    do {
+      brain.step();
+      if (everyStep) collectEvents(time);
+      steps += 1;
+    } while (steps < due && performance.now() < stop);
+    if (!everyStep && time - lastRings >= STEP_MS) {
+      collectEvents(time);
+      lastRings = time;
+    }
+    // If this device couldn't keep up, drop the backlog instead of piling it up.
+    lastStep = steps < due ? time : lastStep + steps * interval;
     syncScene();
-    collectEvents(time);
   }
-  updateSpikes(Math.min(1, (time - lastStep) / STEP_MS));
+  updateSpikes(interval > 0 ? Math.min(1, (time - lastStep) / interval) : 0);
   updateGlow(time);
   updateRings(time);
   controls.update();
