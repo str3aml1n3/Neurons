@@ -328,6 +328,40 @@ often and would otherwise distort the comparison.
   and 31%. Repetition gives hard digits extra practice, a natural curriculum.
   It is not the cause of the ~70% ceiling.
 
+### Connector lifecycle experiments
+
+Normally a neuron keeps the number of dendrites and axons it was born with: a
+pruned connector always regrows. Two optional rules, **off by default**, let
+the count change during the neuron's life:
+
+- **Elimination** (\`eliminateAfter\`): a connector counts its failures (prunes
+  and give-ups) in a row; earning trophic support resets the count. After this
+  many failures it retracts completely and is removed. A neuron always keeps
+  at least one dendrite and one axon.
+- **Sprouting** (\`sproutChance\`, \`sproutActivity\`): each neuron keeps an
+  *activity* trace, raised by 1 whenever it is in the chain of a correct answer
+  and fading by \`activityDecay\` per tick. A neuron with enough activity and
+  fewer than its maximum connectors occasionally grows a new one.
+  \`startMinimal\` makes neurons start with one of each and grow from there.
+
+| Setting | Networks 1–10 | Networks 11–20 | Synapses |
+| --- | --- | --- | --- |
+| Baseline | 72.9% | 76.4% | ~51 |
+| **Eliminate after 3 failures** | 74.0% | 75.1% | **~34** |
+| Eliminate after 2 failures | 73.5% | 71.8% | ~32 |
+| Sprouting (rate 0.002 or 0.01) | 68.0–69.3% | — | ~64 |
+| Elimination + sprouting (several variants) | 69.0–71.7% | 70.5% | 55–62 |
+
+- **Elimination after 3 failures keeps the same accuracy with a third fewer
+  synapses.** Neurons settle at about one dendrite and one axon instead of
+  two, so much of the default wiring isn't doing anything useful.
+- **Sprouting alone fills every neuron to its maximum and does slightly
+  worse**, matching the earlier finding that more inputs don't help.
+- **Together they churn**: about 800–950 sprouts and as many eliminations per
+  network. New connectors grow toward random goals, mostly fail and are
+  removed, and the still-active neuron sprouts again. Sprouting would need
+  guidance, for example toward co-active neurons, to be useful.
+
 ## What you see
 
 | Visual | Meaning |
@@ -404,4 +438,9 @@ All values live in `PARAMS` in [`web/brain.js`](../web/brain.js).
 | `scalingTotal` | 0 | Experimental: input budget per neuron (0 = keep the average at `initialWeight`) |
 | `timingCredit` | 0 (off) | Experimental: credit factor per tick between a signal's arrival and the firing |
 | `retryWrong` | true | Show the same digit again after a wrong answer |
+| `eliminateAfter` | 0 (off) | Lifecycle: remove a connector after this many failures in a row |
+| `sproutChance` | 0 (off) | Lifecycle: per-tick chance an active neuron below its maximum grows a new connector |
+| `sproutActivity` | 1 | Lifecycle: activity a neuron needs before it can sprout |
+| `activityDecay` | 0.999 | Lifecycle: share of activity kept per tick |
+| `startMinimal` | false | Lifecycle: neurons start with one axon and one dendrite |
 | `pause` | 12 | Ticks between trials |

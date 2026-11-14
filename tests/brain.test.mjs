@@ -67,6 +67,35 @@ seeds.forEach((seed) => {
   lateTotal += late.length;
 });
 
+// The optional connector lifecycle (sprouting and elimination) must keep the
+// same rules: connectors are added and removed while the network runs.
+{
+  const brain = new Brain(seeded(7), { eliminateAfter: 2, sproutChance: 0.01, maxDendrites: 5, maxAxons: 5 });
+  let sprouts = 0;
+  let eliminated = 0;
+  for (let tick = 1; tick <= 15000; tick += 1) {
+    brain.step();
+    brain.events.forEach((e) => {
+      if (e.type === 'sprout') sprouts += 1;
+      if (e.type === 'eliminate') eliminated += 1;
+    });
+    if (tick % 1000 === 0) {
+      brain.neurons.forEach((n) => {
+        assert.ok(n.axons.length >= 1 && n.axons.length <= 5, 'lifecycle keeps 1-5 axons');
+        assert.ok(n.dendrites.length >= 1 && n.dendrites.length <= 5, 'lifecycle keeps 1-5 dendrites');
+      });
+      const listed = new Set(brain.connectors);
+      brain.neurons.forEach((n) => [...n.axons, ...n.dendrites].forEach((c) => {
+        assert.ok(listed.has(c), 'every connector is in the connector list');
+      }));
+      brain.connectors.forEach((c) => c.cells.forEach((cell) => {
+        assert.ok(brain.cells.get(keyOf(cell)), 'removed connectors leave no stray cells');
+      }));
+    }
+  }
+  assert.ok(sprouts > 0 && eliminated > 0, 'lifecycle both sprouts and eliminates');
+}
+
 const accuracy = lateCorrect / lateTotal;
 assert.ok(accuracy > 0.53, `learns above chance (late accuracy ${accuracy.toFixed(2)})`);
 console.log(`Brain checks passed: late accuracy ${(accuracy * 100).toFixed(0)}% over ${seeds.length} seeds (chance is 50%)`);

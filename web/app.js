@@ -244,6 +244,8 @@ const RING_STYLE = {
   weaken: { color: new THREE.Color(COLORS.weaken), from: 0.75, to: 0.15, ms: 1100 }, // contracts
   prune: { color: new THREE.Color(COLORS.prune), from: 0.3, to: 1.3, ms: 900 }, // bursts
   form: { color: new THREE.Color(COLORS.form), from: 0.05, to: 0.45, ms: 600 },
+  sprout: { color: new THREE.Color(COLORS.form), from: 0.2, to: 0.7, ms: 700 }, // new dendrite or axon
+  eliminate: { color: new THREE.Color(COLORS.prune), from: 0.4, to: 1.5, ms: 1000 }, // connector removed
 };
 let rings = []; // { position, style, start }
 
@@ -398,9 +400,9 @@ function updateOccupancy() {
 }
 
 function collectEvents(time) {
-  brain.events.forEach(({ type, synapse }) => {
+  brain.events.forEach(({ type, synapse, cell }) => {
     if (rings.length >= MAX_RINGS) rings.shift();
-    rings.push({ position: cellToVector(synapse.cell), style: RING_STYLE[type], start: time });
+    rings.push({ position: cellToVector(cell ?? synapse.cell), style: RING_STYLE[type], start: time });
   });
 }
 

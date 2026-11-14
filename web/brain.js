@@ -64,6 +64,12 @@ export const PARAMS = {
   scalingTotal: 0, // input budget per neuron: 0 = keep the average input at initialWeight, > 0 = fixed total
   timingCredit: 0, // 0 = flat credit; else credit = timingCredit^(ticks between arrival and firing)
   retryWrong: true, // after a wrong answer, show the same digit again
+  // Connector lifecycle (off by default):
+  eliminateAfter: 0, // remove a connector after this many failures in a row (0 = never)
+  sproutChance: 0, // per-tick chance an active neuron below its maximum grows a new connector
+  sproutActivity: 1, // activity a neuron needs before it can sprout
+  activityDecay: 0.999, // activity kept per tick (halves in about 700 ticks)
+  startMinimal: false, // neurons are born with 1 axon and 1 dendrite
   reward: 0.2,
   punish: 0.2,
   pause: 12,
@@ -188,6 +194,7 @@ export class Brain {
   addNode(fields) {
     const node = {
       id: this.nodes.length, potential: 0, refractory: 0, lastFired: -Infinity, threshold: this.p.threshold,
+      activity: 0, // recent part in correct answers; drives sprouting
       shunt: 0, inhibitory: false,
       axons: [], dendrites: [], cells: [fields.soma], ...fields,
     };
@@ -234,10 +241,13 @@ export class Brain {
     }
     // Connectors are created after placement so they can aim at other neurons.
     this.neurons.forEach((neuron) => {
-      for (let a = 1 + this.randInt(this.p.maxAxons); a > 0; a -= 1) {
+      // Counts are drawn in this order (axons, then dendrites) so seeded runs repeat.
+      const axons = this.p.startMinimal ? 1 : 1 + this.randInt(this.p.maxAxons);
+      for (let a = axons; a > 0; a -= 1) {
         neuron.axons.push(this.newConnector(neuron, 'axon'));
       }
-      for (let d = 1 + this.randInt(this.p.maxDendrites); d > 0; d -= 1) {
+      const dendrites = this.p.startMinimal ? 1 : 1 + this.randInt(this.p.maxDendrites);
+      for (let d = dendrites; d > 0; d -= 1) {
         neuron.dendrites.push(this.newConnector(neuron, 'dendrite'));
       }
     });
@@ -247,6 +257,8 @@ export class Brain {
     const connector = {
       owner, type, cells: [], state: 'growing', synapse: null, stuck: 0, steps: 0, goal: null,
       retractLeft: 0, avoid: new Map(), // partner node -> tick until which it is avoided
+      failures: 0, // prunes and give-ups in a row without earning support
+      eliminate: false, // being retracted for good
     };
     this.aim(connector);
     return connector;
@@ -290,6 +302,47 @@ export class Brain {
     return { x: near(center.x), y: near(center.y), z: near(center.z) };
   }
 
+  // A connector that failed to connect pulls back completely; after enough
+  // failures in a row it is removed instead of regrowing.
+  giveUp(connector) {
+    connector.failures += 1;
+    if (this.shouldEliminate(connector)) connector.eliminate = true;
+    this.startRetract(connector, Infinity);
+  }
+
+  shouldEliminate(connector) {
+    const { owner } = connector;
+    const siblings = connector.type === 'axon' ? owner.axons : owner.dendrites;
+    return this.p.eliminateAfter > 0 && owner.kind === 'neuron'
+      && connector.failures >= this.p.eliminateAfter
+      && siblings.filter((c) => !c.eliminate).length > 1; // always keep one that isn't being removed
+  }
+
+  removeConnector(connector) {
+    const { owner } = connector;
+    if (connector.type === 'axon') owner.axons = owner.axons.filter((c) => c !== connector);
+    else owner.dendrites = owner.dendrites.filter((c) => c !== connector);
+    this.connectorList = this.connectorList.filter((c) => c !== connector);
+    this.events.push({ type: 'eliminate', cell: owner.soma });
+  }
+
+  // An active neuron below its maximum grows a new dendrite or axon.
+  sprout() {
+    this.neurons.forEach((neuron) => {
+      neuron.activity *= this.p.activityDecay;
+      if (neuron.activity < this.p.sproutActivity || this.random() >= this.p.sproutChance) return;
+      const room = [];
+      if (neuron.dendrites.length < this.p.maxDendrites) room.push('dendrite');
+      if (neuron.axons.length < this.p.maxAxons) room.push('axon');
+      if (!room.length) return;
+      const type = this.pick(room);
+      const connector = this.newConnector(neuron, type);
+      (type === 'axon' ? neuron.axons : neuron.dendrites).push(connector);
+      this.connectorList.push(connector);
+      this.events.push({ type: 'sprout', cell: neuron.soma });
+    });
+  }
+
   startRetract(connector, cells) {
     connector.state = 'retracting';
     connector.retractLeft = cells;
@@ -307,7 +360,7 @@ export class Brain {
   // connector then follows the shortest free path from its body to the tip.
   grow(connector) {
     if (++connector.steps > this.p.maxSteps) {
-      this.startRetract(connector, Infinity);
+      this.giveUp(connector);
       return;
     }
     const tip = this.tip(connector);
@@ -321,11 +374,11 @@ export class Brain {
       connector.cells.push(next);
       connector.stuck = 0;
       this.straighten(connector);
-      if (connector.cells.length > this.p.maxLength) this.startRetract(connector, Infinity);
+      if (connector.cells.length > this.p.maxLength) this.giveUp(connector);
       return;
     }
     if (!this.tryConnect(connector, next, content) && ++connector.stuck > this.p.stuckLimit) {
-      this.startRetract(connector, Infinity);
+      this.giveUp(connector);
     }
   }
 
@@ -446,7 +499,13 @@ export class Brain {
       if (!c) return;
       c.synapse = null;
       c.avoid.set(partner, this.tick + this.p.avoidTicks);
-      this.startRetract(c, this.p.partialRetract);
+      c.failures += 1;
+      if (this.shouldEliminate(c)) {
+        c.eliminate = true;
+        this.startRetract(c, Infinity);
+      } else {
+        this.startRetract(c, this.p.partialRetract);
+      }
     });
   }
 
@@ -459,6 +518,10 @@ export class Brain {
       if (content?.kind === 'connector' && content.connector === connector) this.cells.delete(keyOf(cell));
     }
     connector.retractLeft -= 1;
+    if (connector.cells.length === 0 && connector.eliminate) {
+      this.removeConnector(connector);
+      return;
+    }
     if (connector.cells.length === 0) {
       connector.state = 'growing';
       this.aim(connector);
@@ -509,7 +572,8 @@ export class Brain {
     if (this.tick % 50 === 0) {
       this.synapses.filter((s) => s.trophic < this.p.trophicFloor).forEach((s) => this.removeSynapse(s, 'unsupported'));
     }
-    this.connectors.forEach((c) => {
+    if (this.p.sproutChance) this.sprout();
+    [...this.connectors].forEach((c) => {
       if (c.state === 'retracting') this.retract(c);
       else if (c.state === 'growing' && this.tick % this.p.growEvery === 0) this.grow(c);
     });
@@ -680,6 +744,8 @@ export class Brain {
     synapses.forEach((s) => perTarget.set(s.to, (perTarget.get(s.to) ?? 0) + 1));
     synapses.forEach((s) => {
       s.trophic = Math.min(this.p.trophicMax, s.trophic + this.p.trophicShare / perTarget.get(s.to));
+      if (s.axon) s.axon.failures = 0;
+      if (s.dendrite) s.dendrite.failures = 0;
     });
   }
 
@@ -724,6 +790,11 @@ export class Brain {
     this.shareTrophic([...helpfulChain]);
     this.chain(harmful).forEach((s) => change(s, -this.p.punish));
     this.lastEligible = new Set([...behindAnswer, ...helpfulChain]);
+    if (correct) {
+      this.lastEligible.forEach((syn) => {
+        [syn.from, syn.to].forEach((node) => { if (node.kind === 'neuron') node.activity += 1; });
+      });
+    }
     let strengthened = 0;
     let weakened = 0;
     deltas.forEach((amount, synapse) => {
