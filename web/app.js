@@ -263,6 +263,42 @@ function curveFromVectors(anchors, seed) {
   return new THREE.CatmullRomCurve3(controls, false, 'centripetal');
 }
 
+function edgeCurve(edge) {
+  const start = pointToVector(edge.source.soma);
+  const end = pointToVector(edge.destination);
+  const span = end.clone().sub(start);
+  const bend = (index) => new THREE.Vector3(
+    Math.sin(edge.curveSeed * 3.13 + index * 2.71),
+    Math.cos(edge.curveSeed * 1.91 + index * 1.37),
+    Math.sin(edge.curveSeed * 4.29 + index * 1.83),
+  ).multiplyScalar(Math.min(1.15, span.length() * 0.13));
+  return new THREE.CatmullRomCurve3([
+    start,
+    start.clone().addScaledVector(span, 0.3).add(bend(1)),
+    start.clone().addScaledVector(span, 0.68).add(bend(2)),
+    end,
+  ], false, 'centripetal');
+}
+
+function edgeProgress(edge) {
+  const source = edge.source.soma;
+  const destination = edge.destination;
+  const steps = Math.abs(destination.x - source.x)
+    + Math.abs(destination.y - source.y)
+    + Math.abs(destination.z - source.z);
+  return Math.min(1, (edge.axon.length - 1) / steps);
+}
+
+function edgeDisplayPoints(edge) {
+  const progress = edgeProgress(edge);
+  if (progress === 0) return [];
+  const curve = edgeCurve(edge);
+  const count = Math.max(2, Math.ceil(progress * 28));
+  return Array.from({ length: count }, (_, index) => curve.getPointAt(
+    (progress * index) / (count - 1),
+  ));
+}
+
 function tubeFromVectors(points, color, radius, opacity, seed) {
   const curve = curveFromVectors(points, seed);
   const geometry = Array.isArray(curve)
@@ -280,9 +316,9 @@ function tubeFromGridPoints(points, color, radius, opacity, seed) {
   return tubeFromVectors(points.map(pointToVector), color, radius, opacity, seed);
 }
 
-function updateTube(tube, points) {
+function updateTube(tube, points, areVectors = false) {
   tube.geometry.dispose();
-  const curve = curveFromVectors(points.map(pointToVector), tube.userData.seed);
+  const curve = curveFromVectors(areVectors ? points : points.map(pointToVector), tube.userData.seed);
   tube.geometry = Array.isArray(curve)
     ? new THREE.BufferGeometry()
     : new THREE.TubeGeometry(curve, Math.max(8, points.length * 5), tube.userData.radius, 6, false);
@@ -301,7 +337,7 @@ function createVisuals() {
     const dendrite = tubeFromGridPoints(neuron.dendrite, style.line, 0.025, 0.72, 100 + neuronIndex);
     neuronGroup.add(dendrite);
     const edges = neuron.edges.map((edge) => {
-      const tube = tubeFromGridPoints(edge.axon, style.line, 0.06, 0.95, edge.curveSeed);
+      const tube = tubeFromVectors(edgeDisplayPoints(edge), style.line, 0.06, 0.95, edge.curveSeed);
       neuronGroup.add(tube);
       return tube;
     });
@@ -329,7 +365,9 @@ function syncVisuals() {
   brain.neurons.forEach((neuron) => {
     const visual = visuals.get(neuron);
     updateTube(visual.dendrite, neuron.dendrite);
-    neuron.edges.forEach((edge, index) => updateTube(visual.edges[index], edge.axon));
+    neuron.edges.forEach((edge, index) => updateTube(
+      visual.edges[index], edgeDisplayPoints(edge), true,
+    ));
   });
   digitElement.textContent = brain.digit;
   statusElement.textContent = brain.dopamine > 0.1 ? `${brain.status}  DOPAMINE` : brain.status;
@@ -361,8 +399,7 @@ function updateSignalFlow(time) {
     return;
   }
   lastSignalDraw = time;
-  const curve = curveFromVectors(brain.signal.axon.map(pointToVector), brain.signal.curveSeed);
-  if (Array.isArray(curve)) return;
+  const curve = edgeCurve(brain.signal);
   const stepProgress = Math.min(1, (time - lastStep) / 100);
   const progress = Math.min(1, (brain.signalIndex + stepProgress) / (brain.signal.axon.length - 1));
   const start = Math.max(0, progress - 0.35);
