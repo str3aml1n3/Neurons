@@ -340,8 +340,10 @@ function updateGlow(time) {
   synapseMeshes.forEach((mesh, synapse) => {
     const strength = synapse.weight / brain.p.maxWeight;
     const credited = rewardGlow && brain.lastEligible?.has(synapse);
+    // Size shows weight; glow shows trophic support, which fades before a prune.
+    const support = Math.min(1, synapse.trophic);
     mesh.scale.setScalar(0.6 + strength * 0.9 + (credited ? brain.dopamine * 0.8 : 0));
-    mesh.material.emissiveIntensity = 0.4 + strength * 0.8 + (credited ? brain.dopamine * 3 : 0);
+    mesh.material.emissiveIntensity = 0.1 + support * 1.1 + (credited ? brain.dopamine * 3 : 0);
   });
   frameMaterial.color.setHex(COLORS.frame).lerp(tint.setHex(COLORS.gold), brain.dopamine);
   frameMaterial.opacity = 0.85 + 0.15 * Math.sin(time * 0.01) * brain.dopamine;

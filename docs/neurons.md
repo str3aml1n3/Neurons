@@ -31,18 +31,27 @@ Signals have a direction: **dendrites carry signals in, axons carry them out.**
 
 Every 2 ticks, each growing connector tries to step one cell from its tip.
 
-- **Goal.** Each connector heads for a goal cell, picked when it starts
-  growing:
+- **Only the tip moves.** The tip (like a real growth cone) explores one cell
+  per step. Behind it, the rest of the connector follows the **shortest path
+  of free cells** from its body to the tip, so detours straighten out and the
+  cells they used are freed. If no shorter free path exists, it keeps its
+  current route.
+- **Goal.** The tip heads for a goal cell. On first growth, the goals act like
+  the chemical guidance cues of a developing brain:
   - Digit axons and output dendrites aim at a random neuron.
   - A neuron's axon aims at another neuron or the output strip (50/50).
   - A neuron's dendrite aims at another neuron or the digit (50/50).
-- **Drift.** 60% of steps move closer to the goal. The rest go in a random
-  direction, so paths wander.
+
+  Neurons the connector is currently avoiding (see
+  [Pruning and regrowth](#pruning-and-regrowth)) are never picked.
+- **Drift.** 60% of tip steps move closer to the goal. The rest go in a random
+  direction, so the tip explores.
 - **Blocked.** A step into an occupied cell that doesn't form a synapse is
-  blocked. After 7 blocked steps in a row, the connector retracts.
-- **Too long.** A connector that grows to 10 cells without connecting retracts.
-- **Retracting** pulls back one cell per tick. Once fully retracted, the
-  connector picks a new goal and grows again.
+  blocked. After 7 blocked steps in a row, the connector gives up.
+- **Giving up.** A connector also gives up after 30 tip steps without
+  connecting, or when its straightened path grows past 10 cells. It then
+  retracts **all the way** to its body and starts over with a new guided goal.
+- **Retracting** pulls back one cell per tick.
 
 ## Synapses
 
@@ -62,10 +71,14 @@ Digit and output cells also connect directly, without growing anything:
 - A neuron's **axon** that reaches an **output cell** connects to it.
 
 Signals always pass through at least one neuron. A digit's axon cannot connect
-to an output's dendrite, and nothing connects a node to itself.
+to an output's dendrite, nothing connects a node to itself, and a connector
+won't connect to a partner it is avoiding.
 
-Every synapse has a **weight** (strength), starting at 1.0 and kept between
-0.05 and 2.0.
+Every synapse has:
+
+- a **weight** (strength), starting at 1.0 and kept between 0.05 and 2.0, and
+- **trophic support**, starting at 1.0 (see
+  [Pruning and regrowth](#pruning-and-regrowth)).
 
 ## Signals and firing
 
@@ -111,7 +124,10 @@ After an answer, the simulation finds the synapses **responsible** for it:
 Then:
 
 - **Correct:** dopamine is released, and each responsible synapse is
-  strengthened by +0.2. A new digit is shown.
+  strengthened by +0.2. Each receiving neuron (or output cell) also shares
+  **1.0 unit of trophic support** among its responsible inputs: one
+  responsible input gets all of it, three get a third each. A new digit is
+  shown.
 - **Wrong:** no dopamine, each responsible synapse is weakened by −0.2, and
   the same digit is shown again.
 
@@ -119,11 +135,31 @@ Synapses that didn't contribute to the answer are not changed.
 
 ## Pruning and regrowth
 
-- A synapse whose weight drops below 0.3 is **pruned**.
-- A synapse that hasn't carried a signal for 1,500 ticks is pruned too.
+This follows how real neurons rewire: support is limited and earned, failures
+are fixed locally, and new contacts form near successful ones.
 
-When a synapse is pruned, both connectors retract and grow again toward new
-goals. Over time, unhelpful wiring is replaced by new attempts.
+**Trophic competition.** Every synapse's trophic support fades by 0.05% per
+tick, about halving every 1,400 ticks, and only rewarded answers renew it.
+Because each receiver shares a fixed amount, its inputs compete for it.
+
+**A synapse is pruned** when either:
+
+- its weight drops below 0.3 (repeated wrong answers), or
+- its trophic support drops below 0.1 (not part of rewarded answers for a
+  long time).
+
+**After a prune**, each side of the synapse:
+
+1. **Retracts partway**: 5 cells, not all the way back to its body.
+2. **Avoids that partner** for 3,000 ticks. It won't connect to the same node
+   again in that time.
+3. **Regrows locally** toward a new goal:
+   - 50% of the time, near its owner's **best-supported synapse** (within 2
+     cells), so new contacts cluster next to successful ones;
+   - otherwise, near where its tip stopped (within 4 cells).
+
+A connector that retracts completely (its path was shorter than 5 cells) or
+that gave up while growing starts over from its body with a new guided goal.
 
 ## How well it learns
 
@@ -131,6 +167,12 @@ The headless test (`node tests/brain.test.mjs`) runs 5 random networks for
 30,000 ticks each. Over each run's last 300 answers, accuracy averages about
 **60%** (chance is 50%). It learns, but only modestly. Excitatory-only neurons,
 a small network and very simple credit assignment limit how far it gets.
+
+Over 10 networks and 40,000 ticks, the regrowth rules (partial retraction,
+avoiding pruned partners, local and clustered regrowth, trophic competition)
+cut prunes by about 40% and rebuilt same-partner connections by about 70%. They
+improved accuracy only slightly, from about 58% to about 62%, which is close to
+the run-to-run noise.
 
 ## What you see
 
@@ -141,7 +183,7 @@ a small network and very simple credit assignment limit how far it gets.
 | Coral tube | Axon (signals out) |
 | Tube thickness | Synapse weight, once connected |
 | Faint tinted cube | A cell occupied by a connector |
-| Lime cube | Synapse; larger means stronger. Responsible synapses flash on dopamine. |
+| Lime cube | Synapse. Size shows weight; glow shows trophic support and fades before a prune. Responsible synapses flash on dopamine. |
 | Glowing dot with a trail | A signal traveling one cell per tick |
 | Gold cells (front) | Digit segments; bright when lit |
 | Blue and red cells (back) | Output strip: blue = small, red = big |
@@ -155,14 +197,24 @@ All values live in `PARAMS` in [`web/brain.js`](../web/brain.js).
 | --- | --- | --- |
 | `neurons` | 16 | Number of neurons |
 | `maxConnectors` | 3 | Max dendrites and max axons per neuron |
-| `maxLength` | 10 | Cells a connector may grow without connecting |
-| `stuckLimit` | 6 | Blocked steps tolerated before retracting |
+| `maxLength` | 10 | Longest straightened path before a connector gives up |
+| `maxSteps` | 30 | Tip steps without connecting before a connector gives up |
+| `stuckLimit` | 6 | Blocked steps tolerated before giving up |
+| `partialRetract` | 5 | Cells pulled back after a synapse is pruned |
+| `avoidTicks` | 3000 | Ticks a connector avoids a pruned partner |
+| `localRadius` | 4 | Regrowth goal distance from the tip after a prune |
+| `cluster` | 0.5 | Chance regrowth aims near the owner's best-supported synapse |
+| `clusterRadius` | 2 | Goal distance from that synapse |
 | `growEvery` | 2 | Ticks between growth steps |
 | `drift` | 0.6 | Chance a step moves toward the goal |
 | `initialWeight` | 1 | Weight of a new synapse |
 | `maxWeight` / `minWeight` | 2 / 0.05 | Weight limits |
 | `pruneBelow` | 0.3 | Weight below which a synapse is pruned |
-| `unusedPrune` | 1500 | Idle ticks before a synapse is pruned |
+| `trophicStart` | 1 | Trophic support of a new synapse |
+| `trophicDecay` | 0.9995 | Share of support kept each tick |
+| `trophicShare` | 1 | Support a receiver shares among its responsible inputs per reward |
+| `trophicMax` | 3 | Support limit |
+| `trophicFloor` | 0.1 | Support below which a synapse is pruned |
 | `threshold` | 1 | Starting firing threshold |
 | `minThreshold` / `maxThreshold` | 0.5 / 2.5 | Threshold limits |
 | `thresholdRecovery` | 0.004 | Threshold drop per tick |

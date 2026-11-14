@@ -19,8 +19,9 @@ learns to tell **small** digits (0–4) from **big** ones (5–9).
   close together, and its signal travels on toward the output strip. There,
   blue cells vote *small* and red cells vote *big*.
 - A correct answer releases **dopamine**, which strengthens the synapses that
-  produced it. A wrong answer weakens them, and weak or unused synapses are
-  pruned and regrow elsewhere.
+  produced it. A wrong answer weakens them. Synapses compete for limited
+  support from rewarded answers, and weak or unsupported ones are pruned:
+  they pull back partway and regrow nearby, avoiding the old partner.
 
 The full rules, parameters and the meaning of every color are in
 **[docs/neurons.md](docs/neurons.md)**. It currently reaches about 60% accuracy

@@ -17,8 +17,14 @@ export const DIGITS = [63, 6, 91, 79, 102, 109, 125, 7, 127, 111];
 export const PARAMS = {
   neurons: 16,
   maxConnectors: 3, // each neuron gets 1..3 dendrites and 1..3 axons
-  maxLength: 10, // cells a connector may grow without connecting
+  maxLength: 10, // longest (straightened) connector before it gives up
+  maxSteps: 30, // tip steps without connecting before it gives up
   stuckLimit: 6, // blocked growth attempts before retracting
+  partialRetract: 5, // cells pulled back after a synapse is pruned
+  avoidTicks: 3000, // ticks a connector won't reconnect to a pruned partner
+  localRadius: 4, // after a prune, regrowth aims within this many cells of the tip
+  cluster: 0.5, // chance regrowth aims near the owner's best-supported synapse
+  clusterRadius: 2,
   growEvery: 2, // ticks between growth steps
   drift: 0.6, // chance a growth step heads toward its goal
   initialWeight: 1,
@@ -30,7 +36,11 @@ export const PARAMS = {
   maxThreshold: 2.5,
   thresholdRecovery: 0.004, // threshold drop per tick, so quiet neurons wake up
   thresholdBoost: 0.08, // threshold rise per firing, so busy neurons calm down
-  unusedPrune: 1500, // ticks without a spike before a synapse is removed
+  trophicStart: 1, // support a new synapse starts with
+  trophicDecay: 0.9995, // support kept per tick
+  trophicShare: 1, // support a node shares among its responsible inputs per reward
+  trophicMax: 3,
+  trophicFloor: 0.1, // synapses with less support are pruned
   leak: 0.7, // potential kept per tick
   noise: 0.08, // random potential added per tick
   refractory: 4,
@@ -156,20 +166,52 @@ export class Brain {
   }
 
   newConnector(owner, type) {
-    const connector = { owner, type, cells: [], state: 'growing', synapse: null, stuck: 0, goal: null };
+    const connector = {
+      owner, type, cells: [], state: 'growing', synapse: null, stuck: 0, steps: 0, goal: null,
+      retractLeft: 0, avoid: new Map(), // partner node -> tick until which it is avoided
+    };
     this.aim(connector);
     return connector;
   }
 
-  // Input axons and output dendrites head for a random neuron. A neuron's
-  // axon heads for another neuron or the output strip; its dendrite for
-  // another neuron or the digit.
-  aim(connector) {
-    const others = this.neurons.filter((n) => n !== connector.owner);
+  avoids(connector, node) {
+    return (connector.avoid.get(node) ?? -1) > this.tick;
+  }
+
+  // First growth follows coarse "guidance cues": input axons and output
+  // dendrites head for a random neuron, a neuron's axon for another neuron or
+  // the output strip, and its dendrite for another neuron or the digit.
+  // Regrowth after a prune is local instead (see localGoal).
+  aim(connector, local = false) {
+    connector.stuck = 0;
+    connector.steps = 0;
+    if (local) {
+      connector.goal = this.localGoal(connector);
+      return;
+    }
+    const others = this.neurons.filter((n) => n !== connector.owner && !this.avoids(connector, n));
     const towardNeuron = connector.owner.kind !== 'neuron' || (others.length && this.random() < 0.5);
     if (towardNeuron && others.length) connector.goal = this.pick(others).soma;
     else connector.goal = connector.type === 'axon' ? this.pick(OUTPUT_CELLS) : this.pick(SEGMENT_CELLS);
-    connector.stuck = 0;
+  }
+
+  // A goal near the connector's tip or, with clustering, near the owner's
+  // best-supported synapse, so new contacts form next to successful ones.
+  localGoal(connector) {
+    const owner = connector.owner;
+    const best = this.synapses
+      .filter((s) => (s.from === owner || s.to === owner) && s.trophic > 0.5)
+      .sort((a, b) => b.trophic - a.trophic)[0];
+    const clustered = best && this.random() < this.p.cluster;
+    const center = clustered ? best.cell : this.tip(connector);
+    const radius = clustered ? this.p.clusterRadius : this.p.localRadius;
+    const near = (v) => Math.max(0, Math.min(SIZE - 1, v + this.randInt(2 * radius + 1) - radius));
+    return { x: near(center.x), y: near(center.y), z: near(center.z) };
+  }
+
+  startRetract(connector, cells) {
+    connector.state = 'retracting';
+    connector.retractLeft = cells;
   }
 
   get connectors() {
@@ -180,9 +222,11 @@ export class Brain {
     return connector.cells.at(-1) ?? connector.owner.soma;
   }
 
+  // Only the tip explores, one whole cell per step. The rest of the
+  // connector then follows the shortest free path from its body to the tip.
   grow(connector) {
-    if (connector.cells.length >= this.p.maxLength) {
-      connector.state = 'retracting';
+    if (++connector.steps > this.p.maxSteps) {
+      this.startRetract(connector, Infinity);
       return;
     }
     const tip = this.tip(connector);
@@ -195,10 +239,46 @@ export class Brain {
       this.cells.set(keyOf(next), { kind: 'connector', connector });
       connector.cells.push(next);
       connector.stuck = 0;
+      this.straighten(connector);
+      if (connector.cells.length > this.p.maxLength) this.startRetract(connector, Infinity);
       return;
     }
     if (!this.tryConnect(connector, next, content) && ++connector.stuck > this.p.stuckLimit) {
-      connector.state = 'retracting';
+      this.startRetract(connector, Infinity);
+    }
+  }
+
+  // Re-route the connector along the shortest path of free (or its own) cells
+  // from its body to its tip, freeing cells it no longer needs.
+  straighten(connector) {
+    const start = connector.owner.soma;
+    const tip = this.tip(connector);
+    if (connector.cells.length <= manhattan(start, tip)) return; // already as short as possible
+    const tipKey = keyOf(tip);
+    const parent = new Map([[keyOf(start), null]]);
+    const queue = [start];
+    for (let i = 0; i < queue.length; i += 1) {
+      const cell = queue[i];
+      if (keyOf(cell) === tipKey) {
+        const route = [];
+        for (let c = cell; parent.get(keyOf(c)) !== null; c = parent.get(keyOf(c))) route.push(c);
+        route.reverse();
+        if (route.length >= connector.cells.length) return;
+        const keep = new Set(route.map(keyOf));
+        connector.cells.forEach((c) => { if (!keep.has(keyOf(c))) this.cells.delete(keyOf(c)); });
+        route.forEach((c) => this.cells.set(keyOf(c), { kind: 'connector', connector }));
+        connector.cells = route;
+        return;
+      }
+      NEIGHBORS.forEach(([dx, dy, dz]) => {
+        const next = { x: cell.x + dx, y: cell.y + dy, z: cell.z + dz };
+        const key = keyOf(next);
+        if (!inside(next) || parent.has(key)) return;
+        const content = this.cells.get(key);
+        if (content && !(content.kind === 'connector' && content.connector === connector)) return;
+        parent.set(key, cell);
+        queue.push(next);
+      });
     }
   }
 
@@ -217,6 +297,7 @@ export class Brain {
       const from = isAxon ? connector.owner : node;
       const to = isAxon ? node : connector.owner;
       if (isAxon !== (node.kind === 'output') || !this.canLink(from, to)) return false;
+      if (this.avoids(connector, node)) return false;
       connector.cells.push(cell);
       this.addSynapse({
         from, to, cell, axon: isAxon ? connector : null, dendrite: isAxon ? null : connector,
@@ -228,6 +309,7 @@ export class Brain {
     const axon = isAxon ? connector : other;
     const dendrite = isAxon ? other : connector;
     if (!this.canLink(axon.owner, dendrite.owner)) return false;
+    if (this.avoids(axon, dendrite.owner) || this.avoids(dendrite, axon.owner)) return false;
     // Cut the other connector back to the shared cell; that cell becomes the synapse.
     const index = other.cells.findIndex((c) => keyOf(c) === keyOf(cell));
     other.cells.splice(index + 1).forEach((c) => this.cells.delete(keyOf(c)));
@@ -238,7 +320,8 @@ export class Brain {
 
   addSynapse(fields) {
     const synapse = {
-      weight: this.p.initialWeight, delivered: false, lastArrival: -Infinity, lastUsed: this.tick, ...fields,
+      weight: this.p.initialWeight, trophic: this.p.trophicStart, delivered: false, lastArrival: -Infinity,
+      ...fields,
     };
     [synapse.axon, synapse.dendrite].forEach((c) => {
       if (!c) return;
@@ -257,23 +340,31 @@ export class Brain {
       this.cells.set(keyOf(synapse.cell), { kind: 'connector', connector: synapse.axon });
       synapse.dendrite.cells.pop();
     }
-    [synapse.axon, synapse.dendrite].forEach((c) => {
+    // Each side pulls back a few cells, remembers to avoid this partner for a
+    // while, and regrows locally from where it stopped.
+    [[synapse.axon, synapse.to], [synapse.dendrite, synapse.from]].forEach(([c, partner]) => {
       if (!c) return;
-      c.state = 'retracting';
       c.synapse = null;
+      c.avoid.set(partner, this.tick + this.p.avoidTicks);
+      this.startRetract(c, this.p.partialRetract);
     });
   }
 
-  // Pull back one cell; once fully retracted, start growing somewhere new.
+  // Pull back one cell. A full retraction (failed growth) restarts from the
+  // body with a new guided goal; a partial one (after a prune) regrows locally.
   retract(connector) {
     const cell = connector.cells.pop();
     if (cell) {
       const content = this.cells.get(keyOf(cell));
       if (content?.kind === 'connector' && content.connector === connector) this.cells.delete(keyOf(cell));
     }
+    connector.retractLeft -= 1;
     if (connector.cells.length === 0) {
       connector.state = 'growing';
       this.aim(connector);
+    } else if (connector.retractLeft <= 0) {
+      connector.state = 'growing';
+      this.aim(connector, true);
     }
   }
 
@@ -307,9 +398,10 @@ export class Brain {
       this.outputPulse.intensity *= 0.9;
       if (this.outputPulse.intensity < 0.05) this.outputPulse = null;
     }
+    // Trophic support fades unless rewarded answers renew it.
+    this.synapses.forEach((s) => { s.trophic *= this.p.trophicDecay; });
     if (this.tick % 50 === 0) {
-      this.synapses.filter((s) => this.tick - s.lastUsed > this.p.unusedPrune)
-        .forEach((s) => this.removeSynapse(s));
+      this.synapses.filter((s) => s.trophic < this.p.trophicFloor).forEach((s) => this.removeSynapse(s));
     }
     this.connectors.forEach((c) => {
       if (c.state === 'retracting') this.retract(c);
@@ -345,7 +437,6 @@ export class Brain {
       spike.index += 1;
       if (spike.index < spike.path.length - 1) return true;
       const { synapse } = spike;
-      synapse.lastUsed = this.tick;
       if (synapse.to.kind === 'output') {
         this.votes[synapse.to.small ? 'small' : 'big'] += synapse.weight;
         synapse.delivered = true;
@@ -410,6 +501,13 @@ export class Brain {
       const change = correct ? this.p.reward : -this.p.punish;
       s.weight = Math.max(this.p.minWeight, Math.min(this.p.maxWeight, s.weight + change));
     });
+    if (correct) {
+      const inputsPerNode = new Map();
+      this.lastEligible.forEach((s) => inputsPerNode.set(s.to, (inputsPerNode.get(s.to) ?? 0) + 1));
+      this.lastEligible.forEach((s) => {
+        s.trophic = Math.min(this.p.trophicMax, s.trophic + this.p.trophicShare / inputsPerNode.get(s.to));
+      });
+    }
     this.synapses.filter((s) => s.weight < this.p.pruneBelow).forEach((s) => this.removeSynapse(s));
     if (correct) {
       this.rewards += 1;
