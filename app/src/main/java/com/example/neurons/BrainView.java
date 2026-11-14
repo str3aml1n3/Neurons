@@ -8,6 +8,7 @@ import android.graphics.Path;
 import android.os.SystemClock;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.WindowInsets;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -23,6 +24,7 @@ final class BrainView extends View {
     private float lastX, lastY;
     private long lastStep;
     private float scale, centerX, centerY;
+    private int insetLeft, insetTop, insetRight, insetBottom;
 
     BrainView(Context context) {
         super(context);
@@ -46,10 +48,14 @@ final class BrainView extends View {
             lastStep = now;
         }
         canvas.drawColor(Color.rgb(8, 14, 28));
+        canvas.save();
+        canvas.translate(insetLeft, insetTop);
+        int width = getWidth() - insetLeft - insetRight;
+        int height = getHeight() - insetTop - insetBottom;
         float density = getResources().getDisplayMetrics().density;
-        scale = Math.min(getWidth() / 15f, getHeight() / 21f);
-        centerX = getWidth() / 2f;
-        centerY = getHeight() * 0.53f;
+        scale = Math.min(width / 15f, height / 21f);
+        centerX = width / 2f;
+        centerY = height * 0.53f;
 
         Collections.sort(surface, new Comparator<Brain.Point>() {
             @Override public int compare(Brain.Point a, Brain.Point b) {
@@ -88,10 +94,20 @@ final class BrainView extends View {
         }
         paint.setColor(Color.rgb(188, 203, 222));
         canvas.drawText("Drag to rotate • opposite face: blue small → red big",
-                18 * density, getHeight() - 38 * density, paint);
+                18 * density, height - 38 * density, paint);
         canvas.drawText("Yellow = signal   •   cyan = neuron", 18 * density,
-                getHeight() - 18 * density, paint);
+                height - 18 * density, paint);
+        canvas.restore();
         postInvalidateDelayed(33);
+    }
+
+    @Override public WindowInsets onApplyWindowInsets(WindowInsets insets) {
+        insetLeft = insets.getSystemWindowInsetLeft();
+        insetTop = insets.getSystemWindowInsetTop();
+        insetRight = insets.getSystemWindowInsetRight();
+        insetBottom = insets.getSystemWindowInsetBottom();
+        invalidate();
+        return insets;
     }
 
     private void drawCell(Canvas canvas, Brain.Point p) {
