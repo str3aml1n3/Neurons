@@ -135,8 +135,9 @@ const digitDark = instanced(ioGeometry, new THREE.MeshLambertMaterial({
   color: COLORS.darkCell, emissive: COLORS.dark, emissiveIntensity: 0.5, transparent: true, opacity: 0.5,
   depthWrite: false,
 }), digitCells.length);
+// Inactive cells stay faintly visible, so axons never seem to start in empty space.
 const digitFaint = instanced(ioGeometry, new THREE.MeshBasicMaterial({
-  transparent: true, opacity: 0.1, depthWrite: false,
+  transparent: true, opacity: 0.28, depthWrite: false,
 }), digitCells.length);
 const outputCells = Array.from({ length: SIZE }, (_, x) => ({
   x,
@@ -441,8 +442,8 @@ function updateSpikes(frac) {
 const haloRest = new THREE.Color(COLORS.dendrite);
 const haloFire = new THREE.Color(COLORS.spikeGlow);
 const gold = new THREE.Color(COLORS.gold);
-const dimGold = new THREE.Color(0x6b5a30);
-const darkFaint = new THREE.Color(COLORS.darkCell);
+const dimGold = new THREE.Color(0x8a7440); // muted lit-channel gold
+const darkFaint = new THREE.Color(0x5e4c8c); // muted dark-channel violet
 const lime = new THREE.Color(COLORS.synapse);
 
 // Per-frame glow effects: firing, charge, input and output activity, dopamine.

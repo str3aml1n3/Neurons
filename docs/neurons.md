@@ -231,8 +231,8 @@ simple credit assignment rarely develop.
 | Lime cube | Synapse. Size shows weight; glow shows trophic support and fades before a prune. Responsible synapses flash on dopamine. |
 | Gold glowing dot with a trail | A signal traveling one cell per tick |
 | Violet glowing dot | A dark-channel signal, on its way to the first neuron. What a neuron fires is always gold. |
-| Gold cells (front, outer) | Lit-channel cells; bright while their segment is lit |
-| Violet cells (front, inner) | Dark-channel cells; glow while their segment is unlit and flash when they fire |
+| Gold cells (front, outer) | Lit-channel cells; bright while their segment is lit, faint gold otherwise |
+| Violet cells (front, inner) | Dark-channel cells; glow while their segment is unlit and flash when they fire, faint violet otherwise |
 | Blue and red cells (back) | Output strip: blue = small, red = big |
 | Gold cube outline | Dopamine is being released |
 
