@@ -36,11 +36,18 @@ const recentElement = document.querySelector('#recent');
 const synapseElement = document.querySelector('#synapses');
 const changesElement = document.querySelector('#changes');
 
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+// On high-density screens the pixels are already fine enough, and multisample
+// antialiasing there is the costliest thing a phone's graphics chip does.
+const renderer = new THREE.WebGLRenderer({
+  canvas, antialias: window.devicePixelRatio < 2, powerPreference: 'high-performance',
+});
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setAnimationLoop(animate);
 
 const scene = new THREE.Scene();
+// Depth fading: parts further from the camera sink toward the background, so
+// near and far wiring separate. The range follows the camera (see animate).
+scene.fog = new THREE.Fog(0x060b17, 10, 40);
 const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 200);
 camera.position.set(10, 8, -15);
 const controls = new OrbitControls(camera, canvas);
@@ -136,7 +143,7 @@ function finish(mesh, count) {
 // Input and output cells are whole cubes inside the grid's front and back
 // layers. Digit cells are split by how visible they should be right now.
 // Rounded cells: each still fills one grid cell, but reads as a soft sensor, not a block.
-const ioGeometry = new RoundedBoxGeometry(0.78, 0.78, 0.78, 2, 0.06);
+const ioGeometry = new RoundedBoxGeometry(0.78, 0.78, 0.78, 1, 0.06);
 const digitCells = SEGMENT_CELLS.map((cell) => ({ cell, position: cellToVector(cell) }));
 const digitLit = instanced(ioGeometry, new THREE.MeshLambertMaterial({
   emissive: 0xa96400, emissiveIntensity: 0.6, transparent: true, opacity: 0.92,
@@ -174,7 +181,7 @@ const MAX_SEGMENTS = 6000;
 // keeps axons and dendrites their true legend colors.
 const connectorMaterial = new THREE.MeshBasicMaterial();
 const segmentMesh = instanced(new THREE.CylinderGeometry(1, 1, 1, 7, 1, true), connectorMaterial, MAX_SEGMENTS);
-const jointMesh = instanced(new THREE.SphereGeometry(1, 8, 6), connectorMaterial, MAX_SEGMENTS);
+const jointMesh = instanced(new THREE.SphereGeometry(1, 6, 4), connectorMaterial, MAX_SEGMENTS);
 const STATE_BRIGHTNESS = { growing: 0.6, connected: 1, retracting: 0.3 };
 
 // Neuron bodies, and their halos as one layer of glowing points with a size
@@ -182,7 +189,7 @@ const STATE_BRIGHTNESS = { growing: 0.6, connected: 1, retracting: 0.3 };
 // A lumpy cell body rather than a perfect sphere; each neuron gets its own
 // rotation and stretch so no two look the same.
 function somaGeometry() {
-  const geometry = new THREE.SphereGeometry(0.38, 24, 18);
+  const geometry = new THREE.SphereGeometry(0.38, 20, 14);
   const position = geometry.attributes.position;
   const v = new THREE.Vector3();
   for (let i = 0; i < position.count; i += 1) {
@@ -196,7 +203,7 @@ function somaGeometry() {
   return geometry;
 }
 const somaMesh = instanced(somaGeometry(), new THREE.MeshStandardMaterial({
-  color: COLORS.neuron, emissive: COLORS.neuron, emissiveIntensity: 0.25, roughness: 0.35,
+  color: COLORS.neuron, emissive: COLORS.neuron, emissiveIntensity: 0.42, roughness: 0.35,
 }), 64);
 const haloGeometry = new THREE.BufferGeometry();
 const haloMaterial = new THREE.ShaderMaterial({
@@ -234,7 +241,7 @@ const inhibitoryBarMesh = instanced(new THREE.CylinderGeometry(0.24, 0.24, 0.07,
 }), 200);
 // An excitatory synapse is the axon's round bouton pressed against a spine
 // head on the dendrite. Size shows weight; brightness shows trophic support.
-const synapsePartGeometry = new THREE.SphereGeometry(1, 14, 10);
+const synapsePartGeometry = new THREE.SphereGeometry(1, 10, 8);
 const synapseMaterial = () => new THREE.MeshStandardMaterial({
   roughness: 0.4, emissive: 0xffffff, emissiveIntensity: 0.06,
 });
@@ -246,6 +253,7 @@ const spineMesh = instanced(synapsePartGeometry, synapseMaterial(), 400);
 const MAX_RINGS = 400;
 const ringMesh = instanced(new THREE.RingGeometry(0.82, 1, 40), new THREE.MeshBasicMaterial({
   transparent: true, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+  fog: false,
 }), MAX_RINGS);
 ringMesh.renderOrder = 9;
 const RING_STYLE = {
@@ -272,7 +280,7 @@ const coreGeometry = new THREE.BufferGeometry();
 coreGeometry.setAttribute('position', new THREE.BufferAttribute(corePositions, 3));
 coreGeometry.setAttribute('color', new THREE.BufferAttribute(coreColors, 3));
 const pointMaterial = (size) => new THREE.PointsMaterial({
-  size, map: glow, vertexColors: true, transparent: true, depthTest: false, depthWrite: false,
+  size, map: glow, vertexColors: true, transparent: true, depthTest: false, depthWrite: false, fog: false,
   blending: THREE.AdditiveBlending,
 });
 const spikeGlow = new THREE.Points(glowGeometry, pointMaterial(1.3));
@@ -677,9 +685,26 @@ function updateGlow(time) {
 // Keep the whole cube in view at any aspect ratio, including tall phones.
 const CUBE_RADIUS = 6.8;
 let fittedAspect = 0;
-function fitCamera(aspect) {
-  const vertical = THREE.MathUtils.degToRad(camera.fov);
-  const horizontal = 2 * Math.atan(Math.tan(vertical / 2) * aspect);
+// The HUD bars cover the top and bottom of the canvas. Their solid parts are
+// measured so the cube is framed and centred in the space between them.
+const topBar = document.querySelector('.hud.top');
+const bottomBar = document.querySelector('.hud.bottom');
+const FADE_PX = 32; // each bar ends in a see-through gradient this tall
+function hudInsets() {
+  // On a wide, tall window the bars' text sits in the corners, clear of the
+  // cube, so only half of their height needs to be kept free.
+  const roomy = canvas.clientWidth > 900 && canvas.clientHeight > 600;
+  const share = roomy ? 0.5 : 1;
+  return {
+    top: Math.max(0, topBar.offsetHeight - FADE_PX) * share,
+    bottom: Math.max(0, bottomBar.offsetHeight - FADE_PX) * share,
+  };
+}
+
+function fitCamera(aspect, freeShare) {
+  const half = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
+  const vertical = 2 * Math.atan(half * freeShare);
+  const horizontal = 2 * Math.atan(half * aspect);
   const distance = CUBE_RADIUS / Math.sin(Math.min(vertical, horizontal) / 2);
   camera.position.sub(controls.target).setLength(distance).add(controls.target);
   controls.minDistance = distance * 0.5;
@@ -687,8 +712,12 @@ function fitCamera(aspect) {
 }
 
 const bufferSize = new THREE.Vector2();
+let fittedFree = 0;
 let lastWidth = 0;
 let lastHeight = 0;
+// When the bottom bar changes height (legend opened or closed, text wrapping),
+// lay the view out again.
+new ResizeObserver(() => { lastWidth = 0; }).observe(bottomBar);
 function resize() {
   const { clientWidth: width, clientHeight: height } = canvas;
   // setSize reallocates the drawing buffer, so only call it when the size changes.
@@ -698,10 +727,15 @@ function resize() {
   renderer.setSize(width, height, false);
   haloMaterial.uniforms.scale.value = renderer.getDrawingBufferSize(bufferSize).y / 2;
   camera.aspect = width / height;
+  const { top, bottom } = hudInsets();
+  const free = Math.max(height * 0.3, height - top - bottom);
+  // Shift the view so the cube's centre sits in the middle of the free space.
+  camera.setViewOffset(width, height, 0, (bottom - top) / 2, width, height);
   camera.updateProjectionMatrix();
-  if (Math.abs(camera.aspect - fittedAspect) > 0.15) {
-    fitCamera(camera.aspect);
+  if (Math.abs(camera.aspect - fittedAspect) > 0.15 || Math.abs(free - fittedFree) > 24) {
+    fitCamera(camera.aspect, free / height);
     fittedAspect = camera.aspect;
+    fittedFree = free;
   }
 }
 
@@ -744,7 +778,26 @@ const FRAME_BUDGET_MS = 10;
 
 function setSpeed(value) {
   speed = value === 'max' ? Infinity : Number(value);
-  document.querySelectorAll('.speed button').forEach((button) => {
+  // The legend starts open where there is room and closed on phones; the
+// viewer's own choice is remembered.
+const legendBox = document.querySelector('#legend-box');
+let legendOpen = window.matchMedia('(min-width: 601px) and (min-height: 501px)').matches;
+try {
+  const saved = localStorage.getItem('neuron-sim-legend');
+  if (saved) legendOpen = saved === 'open';
+} catch {
+  // storage unavailable: use the default for this screen
+}
+legendBox.open = legendOpen;
+legendBox.addEventListener('toggle', () => {
+  try {
+    localStorage.setItem('neuron-sim-legend', legendBox.open ? 'open' : 'closed');
+  } catch {
+    // storage unavailable: the choice lasts until reload
+  }
+});
+
+document.querySelectorAll('.speed button').forEach((button) => {
     button.setAttribute('aria-pressed', String(button.dataset.speed === String(value)));
   });
   try {
@@ -788,6 +841,9 @@ function animate(time) {
   updateGlow(time);
   updateRings(time);
   controls.update();
+  const cameraDistance = camera.position.distanceTo(controls.target);
+  scene.fog.near = cameraDistance - 4;
+  scene.fog.far = cameraDistance + 26;
   renderer.render(scene, camera);
 }
 

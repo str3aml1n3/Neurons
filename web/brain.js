@@ -416,9 +416,18 @@ export class Brain {
       return;
     }
     const tip = this.tip(connector);
-    const moves = NEIGHBORS.map(([dx, dy, dz]) => ({ x: tip.x + dx, y: tip.y + dy, z: tip.z + dz }))
-      .filter((cell) => this.inside(cell));
-    const closer = moves.filter((m) => manhattan(m, connector.goal) < manhattan(tip, connector.goal));
+    // Candidate steps: every neighbour inside the cube, and those that get
+    // closer to the goal. Built in one pass, since this runs for every
+    // growing connector.
+    const moves = [];
+    const closer = [];
+    const here = manhattan(tip, connector.goal);
+    for (let i = 0; i < NEIGHBORS.length; i += 1) {
+      const move = { x: tip.x + NEIGHBORS[i][0], y: tip.y + NEIGHBORS[i][1], z: tip.z + NEIGHBORS[i][2] };
+      if (!this.inside(move)) continue;
+      moves.push(move);
+      if (manhattan(move, connector.goal) < here) closer.push(move);
+    }
     const next = this.random() < this.p.drift && closer.length ? this.pick(closer) : this.pick(moves);
     const content = this.cells.get(keyOf(next));
     if (!content) {
@@ -443,8 +452,14 @@ export class Brain {
     const tipKey = keyOf(tip);
     const parent = new Map([[keyOf(start), null]]);
     const queue = [start];
+    // Only routes shorter than the current one matter, so a cell is skipped
+    // when even a straight run from it to the tip would be too long. This
+    // keeps the search small without changing which route is found.
+    const depths = [0];
+    const limit = connector.cells.length;
     for (let i = 0; i < queue.length; i += 1) {
       const cell = queue[i];
+      const depth = depths[i] + 1;
       if (keyOf(cell) === tipKey) {
         const route = [];
         for (let c = cell; parent.get(keyOf(c)) !== null; c = parent.get(keyOf(c))) route.push(c);
@@ -460,10 +475,12 @@ export class Brain {
         const next = { x: cell.x + dx, y: cell.y + dy, z: cell.z + dz };
         const key = keyOf(next);
         if (!this.inside(next) || parent.has(key)) return;
+        if (depth + manhattan(next, tip) >= limit) return;
         const content = this.cells.get(key);
         if (content && !(content.kind === 'connector' && content.connector === connector)) return;
         parent.set(key, cell);
         queue.push(next);
+        depths.push(depth);
       });
     }
   }
@@ -715,7 +732,9 @@ export class Brain {
     this.nodes.forEach((node) => { node.activity *= this.p.activityDecay; });
     if (this.p.enPassant && this.tick % this.p.enPassantEvery === 0) this.formContacts();
     if (this.p.sproutChance) this.sprout();
-    [...this.connectors].forEach((c) => {
+    // Removing a connector replaces the list rather than changing it, so this
+    // loop can safely walk the list as it was.
+    this.connectorList.forEach((c) => {
       if (c.state === 'retracting') this.retract(c);
       else if (c.state === 'growing' && this.tick % this.p.growEvery === 0) this.grow(c);
     });

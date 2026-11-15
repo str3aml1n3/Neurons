@@ -217,6 +217,31 @@ button:focus-visible {
   color: var(--muted);
 }
 
+#legend-box {
+  pointer-events: auto;
+}
+
+#legend-box summary {
+  display: inline-block;
+  padding: 0.2rem 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+#legend-box summary::-webkit-details-marker {
+  display: none;
+}
+
+#legend-box summary::after {
+  content: " ▸";
+}
+
+#legend-box[open] summary::after {
+  content: " ▾";
+}
+
 .legend {
   display: flex;
   flex-wrap: wrap;
