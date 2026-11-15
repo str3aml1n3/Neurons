@@ -715,6 +715,11 @@ the paired difference from the baseline):
 | Small white flash | A new synapse **formed** |
 | "Last answer" in the HUD | How many synapses the latest answer strengthened, weakened and pruned |
 | 1× / 10× / 100× / Max | Simulation speed. 1× is 10 steps a second; Max runs as many as fit in about 10 ms of each frame. Above 10×, event rings are shown for the latest step at most every 100 ms, so they stay readable. |
+| Dimmer parts | Depth fading: parts further from the camera fade toward the background, so near and far wiring separate. It carries no meaning about the neurons. |
+| Legend ▸ / ▾ | Opens or closes the legend. It starts closed on phones and open on larger screens, and the choice is remembered. |
+
+The cube is framed and centred in the space the top and bottom bars leave free,
+so it stays fully visible on phones.
 
 Each synapse shows at most one strengthen or weaken ring per answer: if several
 learning rules touch the same synapse, their changes are added up first.
