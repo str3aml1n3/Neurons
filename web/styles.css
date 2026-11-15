@@ -148,11 +148,13 @@ button:focus-visible {
   margin: 0;
 }
 
+/* The status text changes every step, so it must never move the speed
+   buttons: it gets a fixed slot, stays on one line and is cut off with "…"
+   if it doesn't fit, instead of wrapping and pushing the buttons around. */
 .status-row {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
   gap: 0.5rem 1rem;
 }
 
@@ -191,9 +193,13 @@ button:focus-visible {
 }
 
 #status {
+  min-width: 0;
+  overflow: hidden;
   color: #d7edff;
   font-size: 1rem;
   font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 #status.reward {
@@ -309,6 +315,15 @@ button:focus-visible {
     font-size: 0.92rem;
   }
 
+  /* Too narrow to share a line: the status gets its own, the buttons the next. */
+  .status-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .speed {
+    justify-self: start;
+  }
+
   .stats {
     font-size: 0.78rem;
   }
@@ -332,6 +347,11 @@ button:focus-visible {
 
   h1 {
     font-size: 1.2rem;
+  }
+
+  /* A fixed-width status slot, so the stats beside it don't shift either. */
+  .status-row {
+    grid-template-columns: 15rem auto;
   }
 
   .bottom {

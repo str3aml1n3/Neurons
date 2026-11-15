@@ -437,7 +437,8 @@ function updateRings(time) {
 function updateHud() {
   digitElement.textContent = brain.digit;
   const rewarded = brain.dopamine > 0.1;
-  statusElement.textContent = rewarded ? `${brain.status} · dopamine` : brain.status;
+  // The status already names the reward; the gold colour marks dopamine.
+  statusElement.textContent = brain.status;
   statusElement.classList.toggle('reward', rewarded);
   scoreElement.textContent = `Correct ${brain.rewards} / ${brain.attempts}`;
   const recent = brain.history.slice(-50);
